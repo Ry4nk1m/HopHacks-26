@@ -86,7 +86,53 @@ export function openSheet(...content) {
   wrap.classList.add('open');
   onSheetClose = opts.onClose || null;
   wrap.onclick = (e) => { if (e.target === wrap && opts.dismissible !== false) closeSheet(); };
+  if (opts.dismissible !== false) enableSwipeClose(sheet);
   return sheet;
+}
+
+// Drag the sheet down to dismiss: from the handle any time, or from anywhere once the content is scrolled to the top.
+function enableSwipeClose(sheet) {
+  const CLOSE_PX = 90;
+  let startY = 0, dy = 0, dragging = false, tracking = false, fromGrab = false, lastY = 0, lastT = 0, vel = 0;
+
+  const begin = (y, onGrab) => { startY = lastY = y; lastT = Date.now(); dy = 0; vel = 0; tracking = true; dragging = false; fromGrab = onGrab; };
+  const move = (y, cancel) => {
+    if (!tracking) return;
+    dy = y - startY;
+    if (!dragging) {
+      if (dy > 6 && (fromGrab || sheet.scrollTop <= 0)) { dragging = true; sheet.style.transition = 'none'; }
+      else if (dy < -6 && !fromGrab) { tracking = false; return; }
+      else return;
+    }
+    if (cancel) cancel();
+    const now = Date.now();
+    vel = (y - lastY) / Math.max(now - lastT, 1);
+    lastY = y; lastT = now;
+    sheet.style.transform = `translateY(${Math.max(dy, 0)}px)`;
+  };
+  const end = () => {
+    if (!tracking) return;
+    tracking = false;
+    if (!dragging) return;
+    dragging = false;
+    sheet.style.transition = '';
+    sheet.style.transform = '';
+    if (dy > CLOSE_PX || vel > 0.6) closeSheet();
+  };
+
+  sheet.addEventListener('touchstart', (e) => begin(e.touches[0].clientY, !!e.target.closest('.grab')), { passive: true });
+  sheet.addEventListener('touchmove', (e) => move(e.touches[0].clientY, () => e.preventDefault()), { passive: false });
+  sheet.addEventListener('touchend', end);
+  sheet.addEventListener('touchcancel', end);
+
+  const grab = sheet.querySelector('.grab');
+  grab.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    begin(e.clientY, true);
+    const mv = (ev) => move(ev.clientY);
+    const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); end(); };
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+  });
 }
 
 export const sheetOpts = (o) => Object.assign(Object.create(null), { __opts: true }, o);

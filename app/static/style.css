@@ -70,7 +70,8 @@ a { color: var(--link); }
 #sheetWrap.open { pointer-events: auto; background: rgba(0,0,0,.45); }
 .sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 92%; overflow-y: auto; background: var(--bg); color: var(--fg); border-radius: 22px 22px 0 0; padding: 8px 18px calc(var(--safe-bottom) + 18px); transform: translateY(105%); transition: transform .26s cubic-bezier(.2,.8,.2,1); overscroll-behavior: contain; }
 #sheetWrap.open .sheet { transform: none; }
-.grab { width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 4px auto 10px; }
+.grab { width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 4px auto 10px; position: relative; touch-action: none; cursor: grab; }
+.grab::after { content: ''; position: absolute; inset: -14px -40px; }
 .sheet h2 { margin: 0; font-size: 1.2rem; line-height: 1.25; }
 .sheet h3 { margin: 16px 0 6px; font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
 .sheet p { margin: 6px 0; }
