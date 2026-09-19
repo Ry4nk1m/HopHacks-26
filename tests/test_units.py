@@ -679,3 +679,68 @@ def test_mission_note_reaches_the_prompt_as_untrusted_context():
     assert build_prompt("confirm", "flood_report", {"note": "still deep"}, "en", 1).count("still deep") == 1
     r = build_prompt("report", "problem_report", {"claimed_type": "problem_report", "note": sneaky}, "en", 1)
     assert json.dumps(sneaky) in r                     # reports get the same protection
+
+
+# Backup models: a model that is out of quota, overloaded or missing is skipped and the next one answers.
+def _chain(handler, fallbacks=("backup-1", "backup-2")):
+    return GeminiValidator("key", "main", client=httpx.Client(transport=httpx.MockTransport(handler)), backoff=0, fallbacks=fallbacks)
+
+
+def _ok(req):
+    return httpx.Response(200, json=_reply('{"subject_ok": true, "task_done": true, "confidence": 0.9}'))
+
+
+def test_gemini_falls_back_when_the_main_model_is_out_of_quota():
+    asked = []
+
+    def handler(req):
+        model = req.url.path.split("/models/")[1].split(":")[0]
+        asked.append(model)
+        return httpx.Response(429, text='{"error": {"message": "quota", "details": "GenerateRequestsPerDay"}}') if model == "main" else _ok(req)
+
+    v = _chain(handler)
+    assert v.check("complete", "tree_water", [b"x"], {}, "en").task_done and asked == ["main", "backup-1"] and v.last_model == "backup-1"
+    asked.clear()
+    assert v.check("complete", "tree_water", [b"x"], {}, "en").task_done
+    assert asked == ["backup-1"]   # the model that is out of quota is left alone for a while, so nobody waits on it again
+
+
+def test_gemini_skips_missing_and_overloaded_models_and_tries_them_in_order():
+    asked = []
+
+    def handler(req):
+        model = req.url.path.split("/models/")[1].split(":")[0]
+        asked.append(model)
+        return httpx.Response(404, text="no such model") if model == "main" else httpx.Response(503, text="busy") if model == "backup-1" else _ok(req)
+
+    assert _chain(handler).check("complete", "tree_water", [b"x"], {}, "en").task_done and asked == ["main", "backup-1", "backup-2"]
+
+
+def test_gemini_gives_up_only_when_every_model_fails_and_a_bad_key_stops_at_once():
+    asked = []
+
+    def down(req):
+        asked.append(req.url.path)
+        return httpx.Response(429, text="slow down")
+
+    with pytest.raises(ValidatorUnavailable, match="429"):
+        _chain(down).check("complete", "tree_water", [b"x"], {}, "en")
+    assert len(asked) == 2 + 3   # main and backup-1 once each, then the last model gets its full retries
+    asked.clear()
+
+    def bad_key(req):
+        asked.append(req.url.path)
+        return httpx.Response(403, text="key blocked")
+
+    with pytest.raises(ValidatorUnavailable, match="403"):
+        _chain(bad_key).check("complete", "tree_water", [b"x"], {}, "en")
+    assert len(asked) == 1   # a blocked key would fail on every model, so nothing else is tried
+
+
+def test_backup_models_come_from_settings():
+    from app.config import Settings
+    from app.validation import make_validator
+    from pathlib import Path
+    s = Settings(data_dir=Path("/tmp/x"), gemini_api_key="k", gemini_fallback_models=("a", "b"))
+    v = make_validator(s)
+    assert v.models == [s.gemini_model, "a", "b"]

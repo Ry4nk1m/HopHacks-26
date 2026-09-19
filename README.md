@@ -59,7 +59,8 @@ Open the printed `https://...trycloudflare.com` address on your phone. See `docs
 
 | Variable | Effect |
 |---|---|
-| `GEMINI_API_KEY`, `GEMINI_MODEL` | Real photo checks (default model `gemini-3.6-flash`; change it if Google retires it). |
+| `GEMINI_API_KEY`, `GEMINI_MODEL` | Real photo checks (default model `gemini-3.1-flash-lite`; change it if Google retires it). |
+| `GEMINI_FALLBACK_MODELS` | Backup models tried in order if the main one is out of quota or overloaded. Each model has its own free allowance, so a chain keeps checks working on the free tier. |
 | `FORCE_MOCK_VALIDATOR=1` | Simulated photo checks even when a key is present (useful for UI testing). |
 | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` | Spoken mission briefings (falls back to the browser voice). The voice must be one your plan can use through the API. |
 | `DEV_TOOLS` | Demo tools on or off. |

@@ -234,10 +234,14 @@ class GeminiValidator:
     name = "gemini"
     endpoint = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
-    def __init__(self, api_key, model, client=None, max_attempts=3, backoff=1.5):
+    def __init__(self, api_key, model, client=None, max_attempts=3, backoff=1.5, fallbacks=()):
         self.api_key, self.model = api_key, model
+        # models to fall back on when one is out of quota, overloaded or missing; each has its own free allowance
+        self.models = [model] + [m for m in fallbacks if m and m != model]
         self.client = client or httpx.Client(timeout=60)
         self.max_attempts, self.backoff = max_attempts, backoff
+        self.last_model = model
+        self._down = {}  # model -> monotonic time before which we skip it
 
     @staticmethod
     def _retry_delay(resp, attempt, base):
@@ -254,12 +258,13 @@ class GeminiValidator:
             hint = float(m.group(1)) if m else None
         return min(hint if hint is not None else base * (2 ** attempt), MAX_RETRY_WAIT_S)
 
-    # Send the request to Gemini, retrying on rate limits or server errors until max_attempts is used up.
-    def _call(self, payload):
-        url = self.endpoint.format(model=self.model)
+    # Ask one model, retrying rate limits and server errors up to `attempts` times.
+    # Returns (body, error, skip_seconds, fatal): skip_seconds is how long to leave this model alone after a failure.
+    def _call_model(self, model, payload, attempts):
+        url = self.endpoint.format(model=model)
         headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
-        last = None
-        for attempt in range(self.max_attempts):
+        last, skip = None, 60
+        for attempt in range(attempts):
             resp = None
             try:
                 resp = self.client.post(url, headers=headers, json=payload)
@@ -267,14 +272,36 @@ class GeminiValidator:
                 last = f"network error: {exc}"
             else:
                 if resp.status_code == 200:
-                    return resp.json()
+                    return resp.json(), None, 0, False
                 last = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                if resp.status_code in (401, 403):
+                    return None, last, 0, True  # a bad or blocked key fails on every model
+                if resp.status_code == 404:
+                    return None, last, 3600, False
                 if resp.status_code not in (429, 500, 502, 503, 504):
-                    break
+                    return None, last, 0, False
                 if resp.status_code == 429 and "PerDay" in (resp.text or ""):
-                    break  # the daily quota will not recover within this request
-            if attempt < self.max_attempts - 1:
+                    return None, last, 600, False  # the daily quota will not recover within this request
+            if attempt < attempts - 1:
                 time.sleep(self._retry_delay(resp, attempt, self.backoff) if resp is not None else self.backoff * (2 ** attempt))
+        return None, last or "unknown error", skip, False
+
+    # Send the request to Gemini. With backup models, a failing model is skipped for a while and the next one is tried at once;
+    # the last model standing gets the full set of retries.
+    def _call(self, payload):
+        now = time.monotonic()
+        order = [m for m in self.models if self._down.get(m, 0) <= now] or list(self.models)
+        last = None
+        for i, model in enumerate(order):
+            body, err, skip, fatal = self._call_model(model, payload, self.max_attempts if i == len(order) - 1 else 1)
+            if body is not None:
+                self.last_model = model
+                return body
+            last = err
+            if skip:
+                self._down[model] = time.monotonic() + skip
+            if fatal:
+                break
         raise ValidatorUnavailable(last or "unknown error")
 
     # Pull the plain text answer out of a Gemini response body.
@@ -330,5 +357,5 @@ class MockValidator:
 # Pick the real Gemini validator if configured, otherwise fall back to the mock validator.
 def make_validator(settings, client=None):
     if settings.validator_mode == "gemini":
-        return GeminiValidator(settings.gemini_api_key, settings.gemini_model, client=client)
+        return GeminiValidator(settings.gemini_api_key, settings.gemini_model, client=client, fallbacks=settings.gemini_fallback_models)
     return MockValidator()

@@ -42,7 +42,8 @@ def _bool(name, default=False):
 class Settings:
     data_dir: Path
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.6-flash"
+    gemini_model: str = "gemini-3.1-flash-lite"
+    gemini_fallback_models: tuple = ()
     eleven_api_key: str = ""
     eleven_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
     dev_tools: bool = False
@@ -95,7 +96,8 @@ def load_settings():
     return Settings(
         data_dir=data_dir,
         gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip(),
-        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.6-flash").strip(),
+        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite").strip(),
+        gemini_fallback_models=tuple(m.strip() for m in os.environ.get("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash-lite,gemini-flash-lite-latest,gemini-3-flash-preview").split(",") if m.strip()),
         eleven_api_key=os.environ.get("ELEVENLABS_API_KEY", "").strip(),
         eleven_voice_id=os.environ.get("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM").strip(),
         dev_tools=_bool("DEV_TOOLS", False),
