@@ -19,6 +19,7 @@ let hud = null;
 let centered = false;
 let pollTimer = null;
 let overlayMenuOpen = false;
+let liveStream = null;
 
 // ------------------------------------------------------------------ HUD
 // Build the heads-up display: profile pill, layer toggle, locate button, voice toggle, filter chips, and the report button.
@@ -242,6 +243,15 @@ async function restoreActiveMission() {
   restoreMission(m, flag);
 }
 
+// Open a live connection to the server so flag updates from other users (or a mission of our own
+// finishing) show up immediately, instead of waiting for the next poll. The browser reconnects
+// this on its own if it drops; the 45s poll below stays as a fallback either way.
+function startLiveUpdates() {
+  if (liveStream || typeof EventSource === 'undefined') return;
+  liveStream = new EventSource('/api/stream');
+  liveStream.onmessage = () => { if (!document.hidden && S.user) loadFlags(); };
+}
+
 // ------------------------------------------------------------------ app lifecycle
 // Enter the main app after login/onboarding: start location, load data, and begin polling for updates.
 async function enterApp() {
@@ -253,6 +263,7 @@ async function enterApp() {
   await restoreActiveMission();
   renderHud();
   if (S.cfg.validator === 'mock') toast(t('demo_banner'), { ms: 5000 });
+  startLiveUpdates();
   if (!pollTimer) pollTimer = setInterval(() => { if (!document.hidden && S.user) loadFlags(); }, 45000);
 }
 
