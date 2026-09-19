@@ -27,6 +27,7 @@ export async function api(path, { method = 'GET', json, form, auth = true } = {}
   const headers = {};
   const t = token.get();
   if (auth && t) headers.Authorization = `Bearer ${t}`;
+  if (path.startsWith('/api/dev/')) { const k = store.get('nm_test'); if (k) headers['X-Admin-Key'] = k; }
   let body;
   if (json !== undefined) { headers['Content-Type'] = 'application/json'; body = JSON.stringify(json); }
   else if (form) body = form;

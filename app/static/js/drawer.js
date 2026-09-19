@@ -1,9 +1,10 @@
 // The side drawer menu: profile, settings, and demo tools. Can be opened by swiping from the screen edge.
 
 import { S, store } from './state.js';
-import { el, icon, closeSheet } from './ui.js';
+import { el, icon, closeSheet, toast } from './ui.js';
 import { t } from './i18n.js';
-import { openProfile, openAbout, demoTools } from './profile.js';
+import { openProfile, openAbout, demoTools, weatherTools } from './profile.js';
+import { api } from './api.js';
 import { stopVoice } from './voice.js';
 
 const EDGE_PX = 22;
@@ -55,6 +56,28 @@ function row(ic, title, sub, onclick) {
 }
 
 // Draw the full contents of the drawer: profile header, settings, mission blurb, and demo tools.
+// Five quick taps on the footer ask for the test key, which unlocks the weather test tools on a live site.
+let taps = 0, tapTimer = null;
+async function footTap() {
+  if (S.cfg.dev_tools || !S.cfg.test_unlock || store.get('nm_test')) return;
+  taps += 1;
+  clearTimeout(tapTimer);
+  tapTimer = setTimeout(() => { taps = 0; }, 1500);
+  if (taps < 5) return;
+  taps = 0;
+  const key = (window.prompt(t('test_key_ask')) || '').trim();
+  if (!key) return;
+  store.set('nm_test', key);
+  try {
+    await api('/api/dev/state');
+    toast(t('test_unlocked'));
+  } catch (e) {
+    store.del('nm_test');
+    toast(t('test_key_bad'));
+  }
+  render();
+}
+
 function render() {
   const u = S.user;
   const voiceSwitch = el('button', { class: 'dr-row', role: 'switch', 'aria-checked': String(S.voice), onclick: () => {
@@ -81,7 +104,12 @@ function render() {
     el('h3', {}, t('mission_h')),
     el('p', { class: 'dr-mission' }, t('mission_body')),
   ];
-  kids.push(el('p', { class: 'dr-foot' }, `${S.cfg.app_name} · ${t('by_club', { site: S.cfg.site_name })}`));
+  const unlocked = !S.cfg.dev_tools && !!store.get('nm_test');
+  if (unlocked) {
+    kids.push(el('div', { class: 'dr-demo' }, ...weatherTools(() => { if (isOpen) render(); }),
+      el('div', { class: 'actions' }, el('button', { class: 'btn', onclick: () => { store.del('nm_test'); render(); } }, t('test_lock')))));
+  }
+  kids.push(el('p', { class: 'dr-foot', onclick: footTap }, `${S.cfg.app_name} · ${t('by_club', { site: S.cfg.site_name })}`));
   if (S.cfg.dev_tools) kids.push(el('div', { class: 'dr-demo' }, ...demoTools(() => { if (isOpen) render(); }, () => { closeDrawer(); closeSheet(); })));
   panel.replaceChildren(...kids);
 }

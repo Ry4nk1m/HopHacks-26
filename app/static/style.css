@@ -227,3 +227,6 @@ table.lb td:last-child { text-align: right; font-weight: 600; }
 .dr-demo .btn { color: #fbefd9; }
 .dr-demo h3, .dr-demo .lbl, .dr-demo p { color: var(--hud-muted); }
 .dr-foot { margin: 22px 10px 0; font-size: .72rem; color: var(--hud-muted); text-align: center; letter-spacing: .02em; }
+.preset-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 8px 0 4px; }
+.preset-grid .btn { min-height: 46px; padding: 10px 8px; font-size: .88rem; }
+.dr-foot { cursor: default; user-select: none; -webkit-user-select: none; }

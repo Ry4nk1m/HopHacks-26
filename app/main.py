@@ -1,5 +1,6 @@
 # Main FastAPI app: builds the app, wires up background jobs, and defines all API routes.
 
+import hmac
 import json
 import threading
 import time
@@ -198,6 +199,15 @@ def create_app(settings: Optional[Settings] = None, validator=None):
         if not settings.dev_tools:
             raise HTTPException(404, detail="not found")
 
+    # Weather test tools: open in dev mode, or on a live site to whoever holds the admin key. Reset and teleport stay dev-only.
+    def require_test_tools(x_admin_key: Optional[str] = Header(None)):
+        if settings.dev_tools:
+            return
+        if not settings.admin_key:
+            raise HTTPException(404, detail="not found")
+        if not x_admin_key or not hmac.compare_digest(x_admin_key, settings.admin_key):
+            raise HTTPException(403, detail={"code": "forbidden"})
+
     # Block access unless the correct admin key was supplied.
     def require_admin(x_admin_key: Optional[str] = Header(None), key: Optional[str] = None):
         supplied = x_admin_key or key
@@ -233,7 +243,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
         satellite = state["sat"]
         meta = satellite.meta if satellite else None
         return {
-            "app_name": APP_NAME, "site_name": SITE_NAME, "validator": validator.name, "tts": settings.tts_enabled, "dev_tools": settings.dev_tools,
+            "app_name": APP_NAME, "site_name": SITE_NAME, "validator": validator.name, "tts": settings.tts_enabled, "dev_tools": settings.dev_tools, "test_unlock": bool(settings.admin_key),
             "aoi": list(settings.aoi), "center": list(settings.center), "map_style_url": settings.map_style_url,
             "photo_retention_days": settings.photo_retention_days,
             "rules": {"flag_types": {k: {"points": v["points"], "radius_m": v["radius_m"], "purpose": v["purpose"]} for k, v in rules.FLAG_TYPES.items()},
@@ -369,7 +379,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
 
     # ------------------------------------------------------------ dev tools (demo and walk-testing)
     # Show current trigger conditions and flag counts, for debugging (dev tools only).
-    @app.get("/api/dev/state", dependencies=[Depends(require_dev)])
+    @app.get("/api/dev/state", dependencies=[Depends(require_test_tools)])
     def dev_state():
         with conn() as c:
             cond = signals.conditions(c)
@@ -380,7 +390,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
                                   "refresh_days": settings.satellite_refresh_days}}
 
     # Force a trigger condition on or off for testing (dev tools only).
-    @app.post("/api/dev/force", dependencies=[Depends(require_dev)])
+    @app.post("/api/dev/force", dependencies=[Depends(require_test_tools)])
     def dev_force(body: ForceIn):
         try:
             with conn() as c:
@@ -390,7 +400,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
         return {"sync": sync(force=True)}
 
     # Force a refresh of external signal data (dev tools only).
-    @app.post("/api/dev/refresh", dependencies=[Depends(require_dev)])
+    @app.post("/api/dev/refresh", dependencies=[Depends(require_test_tools)])
     def dev_refresh():
         return {"status": refresh_external(), "sync": sync(force=True)}
 

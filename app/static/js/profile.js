@@ -62,27 +62,50 @@ export async function openProfile() {
   openSheet(...parts);
 }
 
-// Build the dev-only demo controls: teleport near a flag, force weather conditions, refresh or reset data.
-export function demoTools(reopen, done) {
+// Weather test controls: one-tap presets plus a per-condition override. Forced conditions apply to everyone using the app.
+export function weatherTools(reopen) {
   const forced = (S.conditions && S.conditions.forced) || {};
-  const p = getPos();
-  const near = [...S.flags].filter((f) => f.status === 'open').map((f) => ({ f, d: p ? haversine(p.lat, p.lon, f.lat, f.lon) : 0 }))
-    .sort((a, b) => (p ? a.d - b.d : b.f.priority - a.f.priority)).slice(0, 6);
+  const send = async (name, mode) => api('/api/dev/force', { method: 'POST', json: { name, mode } });
+  const preset = async (modes) => {
+    try { for (const [name, mode] of Object.entries(modes)) await send(name, mode); toast(t('force_applied')); }
+    catch (e) { toast(codeMessage(e.code)); }
+    emit('flags:refresh');
+    setTimeout(reopen, 700);
+  };
   const force = (name, label) => el('div', {}, el('label', { class: 'lbl' }, label),
     el('div', { class: 'seg' }, [['auto', t('force_auto')], ['on', t('force_on')], ['off', t('force_off')]].map(([mode, text]) =>
       el('button', { 'aria-pressed': String((forced[name] || 'auto') === mode), onclick: async () => {
-        try { await api('/api/dev/force', { method: 'POST', json: { name, mode } }); } catch (e) { toast(codeMessage(e.code)); }
+        try { await send(name, mode); } catch (e) { toast(codeMessage(e.code)); }
         emit('flags:refresh');
         setTimeout(reopen, 700);
       } }, text))));
+  const anyForced = ['heat', 'rain', 'dry'].some((n) => (forced[n] || 'auto') !== 'auto');
+  return [
+    el('h3', {}, t('prof_weather_test')),
+    el('p', { class: 'muted small' }, anyForced ? t('force_active') : t('force_help')),
+    el('div', { class: 'preset-grid' },
+      el('button', { class: 'btn', onclick: () => preset({ heat: 'on', dry: 'on', rain: 'off' }) }, t('preset_heat')),
+      el('button', { class: 'btn', onclick: () => preset({ rain: 'on', heat: 'off', dry: 'off' }) }, t('preset_storm')),
+      el('button', { class: 'btn', onclick: () => preset({ heat: 'on', rain: 'on', dry: 'on' }) }, t('preset_all')),
+      el('button', { class: 'btn primary', onclick: () => preset({ heat: 'auto', rain: 'auto', dry: 'auto' }) }, t('preset_real'))),
+    el('h3', {}, t('prof_force')), force('heat', t('force_heat')), force('rain', t('force_rain')), force('dry', t('force_dry')),
+    el('div', { class: 'actions' },
+      el('button', { class: 'btn', onclick: async () => { try { await api('/api/dev/refresh', { method: 'POST' }); } catch (e) { toast(codeMessage(e.code)); } emit('flags:refresh'); toast(t('prof_refresh')); } }, icon('refresh', 18), t('prof_refresh'))),
+  ];
+}
+
+// Build the dev-only demo controls: teleport near a flag, weather tests, reset data.
+export function demoTools(reopen, done) {
+  const p = getPos();
+  const near = [...S.flags].filter((f) => f.status === 'open').map((f) => ({ f, d: p ? haversine(p.lat, p.lon, f.lat, f.lon) : 0 }))
+    .sort((a, b) => (p ? a.d - b.d : b.f.priority - a.f.priority)).slice(0, 6);
   return [
     el('h3', {}, t('prof_demo')),
     el('p', { class: 'muted small' }, t('prof_fake_help')),
     el('div', { class: 'tags' }, near.map(({ f }) => el('button', { class: 'tag', onclick: () => { setFake(f.lat + 0.00006, f.lon); emit('map:center', { lat: f.lat, lon: f.lon }); toast(t('teleported')); done(); } }, short(flagTitle(f))))),
     S.fake ? el('div', { class: 'actions' }, el('button', { class: 'btn', onclick: () => { clearFake(); done(); } }, t('prof_real'))) : null,
-    el('h3', {}, t('prof_force')), force('heat', t('force_heat')), force('rain', t('force_rain')), force('dry', t('force_dry')),
+    ...weatherTools(reopen),
     el('div', { class: 'actions' },
-      el('button', { class: 'btn', onclick: async () => { try { await api('/api/dev/refresh', { method: 'POST' }); } catch (e) { toast(codeMessage(e.code)); } emit('flags:refresh'); toast(t('prof_refresh')); } }, icon('refresh', 18), t('prof_refresh')),
       el('button', { class: 'btn danger', onclick: async () => {
         if (!confirm(t('prof_reset_confirm'))) return;
         try { await api('/api/dev/reset', { method: 'POST' }); } catch (e) { toast(codeMessage(e.code)); }

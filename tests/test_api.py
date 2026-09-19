@@ -531,3 +531,32 @@ def test_static_files_and_path_safety(env):
 def test_tts_falls_back_without_a_key(env):
     r = env.client.post("/api/tts", json={"text": "hello", "lang": "en"})
     assert r.status_code == 503 and r.json()["fallback"] == "browser"
+
+
+def test_weather_test_tools_on_a_live_site_need_the_admin_key(tmp_path):
+    from fastapi.testclient import TestClient
+    from app.config import Settings
+    from app.main import create_app
+    live = Settings(data_dir=tmp_path, external_fetch=False, background_jobs=False, dev_tools=False, admin_key="s3cret")
+    c = TestClient(create_app(live))
+    assert c.get("/api/config").json()["test_unlock"] is True and c.get("/api/config").json()["dev_tools"] is False
+    body = {"name": "heat", "mode": "on"}
+    assert c.post("/api/dev/force", json=body).status_code == 403                                   # no key
+    assert c.post("/api/dev/force", json=body, headers={"X-Admin-Key": "wrong"}).status_code == 403
+    assert c.get("/api/dev/state").status_code == 403
+    ok = c.post("/api/dev/force", json=body, headers={"X-Admin-Key": "s3cret"})
+    assert ok.status_code == 200
+    assert c.get("/api/dev/state", headers={"X-Admin-Key": "s3cret"}).json()["conditions"]["heat"] is True
+    assert c.post("/api/dev/force", json={"name": "heat", "mode": "auto"}, headers={"X-Admin-Key": "s3cret"}).status_code == 200
+    # the dangerous tools stay off even with the key
+    assert c.post("/api/dev/reset", headers={"X-Admin-Key": "s3cret"}).status_code == 404
+    assert c.post("/api/dev/satellite", headers={"X-Admin-Key": "s3cret"}).status_code == 404
+
+
+def test_weather_test_tools_are_off_without_an_admin_key_set(tmp_path):
+    from fastapi.testclient import TestClient
+    from app.config import Settings
+    from app.main import create_app
+    c = TestClient(create_app(Settings(data_dir=tmp_path, external_fetch=False, background_jobs=False, dev_tools=False, admin_key="")))
+    assert c.get("/api/config").json()["test_unlock"] is False
+    assert c.post("/api/dev/force", json={"name": "heat", "mode": "on"}, headers={"X-Admin-Key": ""}).status_code == 404  # looks like it does not exist
