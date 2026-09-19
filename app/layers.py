@@ -1,3 +1,6 @@
+# Turns satellite grid data (NDVI vegetation, LST heat) into colored PNG map overlays.
+# Also has helpers for the image bounds and a link to a NASA true-color tile layer.
+
 import cv2
 import numpy as np
 
@@ -8,12 +11,14 @@ NDVI_RANGE = (0.0, 0.8)
 UPSCALE = 4
 ALPHA = 165
 
+# Text labels shown next to each layer's color legend on the map.
 LEGENDS = {
     "ndvi": {"low": "Less green", "high": "More green"},
     "lst": {"low": "Cooler", "high": "Hotter"},
 }
 
 
+# Turn a value (0..1) into an RGB color by blending between the given color stops.
 def _ramp(t, stops):
     t = np.clip(t, 0, 1)
     out = np.zeros(t.shape + (3,), dtype=np.float32)
@@ -54,5 +59,6 @@ def bounds_of(grid):
     return [[grid.west, grid.north], [east, grid.north], [east, south], [grid.west, south]]
 
 
+# URL template for NASA's true-color satellite tile layer (fill in z/y/x).
 NASA_TRUE_COLOR = ("https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/"
                    "default/default/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg")

@@ -1,3 +1,5 @@
+# Simple rate limiter that tracks how many times each key was hit recently.
+
 import threading
 import time
 from collections import defaultdict, deque
@@ -11,6 +13,8 @@ class RateLimiter:
         self._lock = threading.Lock()
         self._clock = clock
 
+    # Check if a key is still allowed within its limit for the given time window.
+    # Drops old hits outside the window, then records this hit if under the limit.
     def allow(self, key, limit, window_s):
         now = self._clock()
         with self._lock:
@@ -22,6 +26,7 @@ class RateLimiter:
             q.append(now)
             return True
 
+    # Clear all recorded hits for every key.
     def reset(self):
         with self._lock:
             self._hits.clear()

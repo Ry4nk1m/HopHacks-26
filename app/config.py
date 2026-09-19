@@ -1,3 +1,6 @@
+# App settings and config loading.
+# Reads values from the .env file and system env vars, then builds a Settings object.
+
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,6 +13,8 @@ SITE_NAME = "TheUmbrellaClub"
 DEFAULT_AOI = (-76.645, 39.310, -76.595, 39.350)
 
 
+# Read key=value lines from a .env file and load them into the environment.
+# Skips blank lines and comments. Does not overwrite vars already set.
 def _load_dotenv(path):
     if not path.exists():
         return
@@ -24,6 +29,7 @@ def _load_dotenv(path):
 _load_dotenv(ROOT / ".env")
 
 
+# Read an env var as a bool. Accepts 1/true/yes/on as true.
 def _bool(name, default=False):
     raw = os.environ.get(name)
     if raw is None or raw == "":
@@ -31,6 +37,7 @@ def _bool(name, default=False):
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+# Holds all app settings, filled in by load_settings below.
 @dataclass
 class Settings:
     data_dir: Path
@@ -51,30 +58,38 @@ class Settings:
     external_fetch: bool = True
     snapshot_dir: Path = field(default_factory=lambda: ROOT / "app" / "data")
 
+    # Use gemini for validation if we have a key and mock mode is off.
     @property
     def validator_mode(self):
         return "gemini" if self.gemini_api_key and not self.force_mock_validator else "mock"
 
+    # Text to speech is only on if we have an ElevenLabs key.
     @property
     def tts_enabled(self):
         return bool(self.eleven_api_key)
 
+    # Midpoint of the area of interest, as (lat, lon).
     @property
     def center(self):
         w, s, e, n = self.aoi
         return ((s + n) / 2, (w + e) / 2)
 
 
+# Build a Settings object from env vars, with fallback defaults.
 def load_settings():
+    # Data dir can be relative or absolute. Relative paths are from the project root.
     data_dir = Path(os.environ.get("DATA_DIR", ROOT / "data"))
     if not data_dir.is_absolute():
         data_dir = ROOT / data_dir
+
+    # Parse the area of interest bounding box if one was set.
     aoi = DEFAULT_AOI
     raw = os.environ.get("AOI_BBOX", "").strip()
     if raw:
         parts = [float(p) for p in raw.split(",")]
         if len(parts) == 4:
             aoi = tuple(parts)
+
     return Settings(
         data_dir=data_dir,
         gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip(),

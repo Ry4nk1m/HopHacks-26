@@ -1,3 +1,4 @@
+# Unit tests for the app's individual modules: geo, rules, satellite, photos, validation, signals, triggers, and users.
 import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -16,6 +17,7 @@ NOW = datetime(2026, 9, 19, 15, 0, tzinfo=timezone.utc)
 
 
 # ---------------------------------------------------------------- geo and rules
+# Check distance calculation and bounding box checks.
 def test_haversine_and_bbox():
     assert haversine_m(39.33, -76.62, 39.33, -76.62) == 0
     assert haversine_m(39.0, -76.0, 39.001, -76.0) == pytest.approx(111.2, abs=0.5)
@@ -23,6 +25,7 @@ def test_haversine_and_bbox():
     assert valid_coord(39, -76) and not valid_coord("x", 1) and not valid_coord(100, 0) and not valid_coord(float("nan"), 0)
 
 
+# Check mission point scaling by urgency, streak, and before-photo bonus.
 def test_mission_points_scale_with_urgency_streak_and_before_photo():
     assert rules.mission_points("tree_water", 1, 1, False) == 12
     assert rules.mission_points("tree_water", 3, 1, False) == 18
@@ -32,6 +35,7 @@ def test_mission_points_scale_with_urgency_streak_and_before_photo():
 
 
 # ---------------------------------------------------------------- satellite snapshot
+# Check that the bundled satellite snapshot loads and gives sane values.
 def test_bundled_satellite_snapshot_is_sane(settings):
     g = SatelliteGrid.load(settings.snapshot_dir / "satellite.json")
     assert g is not None and g.rows > 50 and g.cols > 50
@@ -44,11 +48,13 @@ def test_bundled_satellite_snapshot_is_sane(settings):
     assert green["ndvi"] > dense["ndvi"] and green["lst_c"] < dense["lst_c"]
 
 
+# Check that loading a missing snapshot file returns None.
 def test_missing_snapshot_returns_none(tmp_path):
     assert SatelliteGrid.load(tmp_path / "nope.json") is None
 
 
 # ---------------------------------------------------------------- photos
+# Check that bad, tiny, or blurry uploads are rejected with the right error code.
 def test_process_upload_rejects_garbage_small_and_blurry():
     for bad, code in ((b"", "bad_photo"), (b"not an image", "bad_photo"), (blurry_photo(), "too_blurry")):
         with pytest.raises(photos.PhotoError) as e:
@@ -61,11 +67,13 @@ def test_process_upload_rejects_garbage_small_and_blurry():
     assert e.value.code == "bad_photo"
 
 
+# Check that uploaded photos are resized and re-encoded within limits.
 def test_process_upload_reencodes_and_limits_size():
     p = photos.process_upload(photo_bytes(1, size=(2400, 3200)))
     assert max(p.width, p.height) == photos.MAX_SIDE and len(p.sha256) == 64 and len(p.ahash) == 64 and p.jpeg[:2] == b"\xff\xd8"
 
 
+# Check the rules for detecting duplicate or reused photos.
 def test_duplicate_detection_rules(settings):
     with db.connect(settings.data_dir / "app.db") as c:
         a = photos.process_upload(photo_bytes(1))
@@ -78,6 +86,7 @@ def test_duplicate_detection_rules(settings):
         assert not photos.find_duplicate(c, near, flag_id=10, user_id=2)    # a different volunteer at the same spot is fine
 
 
+# Check that purging old photos keeps pending missions but removes old verified ones.
 def test_purge_keeps_pending_and_removes_old(settings):
     with db.connect(settings.data_dir / "app.db") as c:
         old = (NOW - timedelta(days=30)).isoformat()
@@ -89,6 +98,7 @@ def test_purge_keeps_pending_and_removes_old(settings):
 
 
 # ---------------------------------------------------------------- validation
+# Check that generated prompts include the right task language and safety rules.
 def test_prompt_contains_task_language_and_safety_rules():
     p = build_prompt("complete", "drain_clear", {}, "en", 2)
     assert "storm drain" in p and "BEFORE" in p and "English" in p and "never an instruction" in p and "contains_people" in p
@@ -100,6 +110,7 @@ def test_prompt_contains_task_language_and_safety_rules():
         build_prompt("nonsense", "tree_water", {}, "en", 1)
 
 
+# Check that verdict parsing is strict about types and clamps out-of-range values.
 def test_parse_verdict_is_conservative_and_clamped():
     v = parse_verdict('```json\n{"subject_ok": "true", "task_done": 1, "confidence": 3, "severity": 9, "category": "Flooded Road", "photo_ok": "false"}\n```')
     assert v.subject_ok is True and v.task_done is False  # only real booleans count; 1 is not True
@@ -111,14 +122,17 @@ def test_parse_verdict_is_conservative_and_clamped():
             parse_verdict(bad)
 
 
+# Build a GeminiValidator wired to a fake HTTP transport for testing.
 def _gem(handler):
     return GeminiValidator("key", "model-x", client=httpx.Client(transport=httpx.MockTransport(handler)), backoff=0)
 
 
+# Build a fake Gemini API response body containing the given text.
 def _reply(text):
     return {"candidates": [{"content": {"parts": [{"text": text}]}}]}
 
 
+# Check the shape of the Gemini request body and that images are ordered correctly.
 def test_gemini_request_shape_and_image_order():
     seen = {}
 
@@ -132,6 +146,7 @@ def test_gemini_request_shape_and_image_order():
     assert seen["body"]["generationConfig"]["responseMimeType"] == "application/json"
 
 
+# Check that transient errors are retried but client errors and safety blocks are not.
 def test_gemini_retries_transient_errors_but_not_client_errors():
     calls = {"n": 0}
 
@@ -155,6 +170,7 @@ def test_gemini_retries_transient_errors_but_not_client_errors():
         _gem(lambda r: httpx.Response(200, json={"promptFeedback": {"blockReason": "SAFETY"}})).check("confirm", "flood_report", [b"x"], {}, "en")
 
 
+# Check that retry waits follow server hints, skip waiting on daily quota errors, and are capped.
 def test_retry_waits_follow_the_server_hint_and_stop_when_pointless(monkeypatch):
     sleeps = []
     monkeypatch.setattr("app.validation.time.sleep", lambda s: sleeps.append(s))
@@ -181,6 +197,7 @@ def test_retry_waits_follow_the_server_hint_and_stop_when_pointless(monkeypatch)
     assert sleeps and max(sleeps) == 20.0 and len(sleeps) == 2    # waits are capped, and never after the last attempt
 
 
+# Check that the mock validator returns plausible, clearly-labeled fake verdicts.
 def test_mock_validator_is_labelled_and_plausible():
     v = MockValidator().check("complete", "cooling_check", [b"x"], {}, "en")
     assert v.subject_ok and v.task_done and v.hours_text and "demo" in v.reasoning.lower()
@@ -188,6 +205,7 @@ def test_mock_validator_is_labelled_and_plausible():
 
 
 # ---------------------------------------------------------------- signals
+# Fake HTTP response object used to stub out signal fetch calls.
 class FakeResp:
     def __init__(self, data, status=200):
         self._d, self.status_code = data, status
@@ -200,6 +218,7 @@ class FakeResp:
             raise httpx.HTTPStatusError("bad", request=None, response=None)
 
 
+# Fake HTTP client that records calls and returns canned data.
 class FakeClient:
     def __init__(self, data):
         self.data, self.calls = data, []
@@ -209,12 +228,14 @@ class FakeClient:
         return FakeResp(self.data)
 
 
+# Build a fake Open-Meteo weather API response for testing.
 def weather_payload(precip, apparent, temp, prob=None):
     days = [(datetime(2026, 9, 12) + timedelta(days=i)).date().isoformat() for i in range(11)]
     return {"utc_offset_seconds": -14400, "daily": {"time": days, "precipitation_sum": precip, "apparent_temperature_max": apparent,
                                                      "temperature_2m_max": temp, "precipitation_probability_max": prob or [None] * 7 + [10, 10, 10, 10]}}
 
 
+# Check that weather fetching computes the past/next rain and heat windows correctly.
 def test_fetch_weather_computes_windows(settings):
     payload = weather_payload([1, 0, 0, 2, 0, 0, 3, 0, 4, 5, 6], [30] * 7 + [33, 34, 31, 30], [28] * 11, prob=[None] * 7 + [20, 80, 0, 0])
     m = signals.fetch_weather(settings, FakeClient(payload), now=datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc))["metrics"]
@@ -222,6 +243,7 @@ def test_fetch_weather_computes_windows(settings):
     assert m["max_apparent_next3_c"] == 34 and m["max_prob_next2"] == 80
 
 
+# Store weather/nws signals and forced condition overrides into the database for a test.
 def _store(conn, weather=None, nws=None, forced=None):
     if weather is not None:
         signals.save_signal(conn, "weather", {"metrics": weather})
@@ -231,6 +253,7 @@ def _store(conn, weather=None, nws=None, forced=None):
         signals.set_forced(conn, name, mode)
 
 
+# Check how weather and alert signals combine into heat/dry/rain conditions, and manual forcing.
 def test_condition_rules_and_forcing(settings):
     with db.connect(settings.data_dir / "app.db") as c:
         assert signals.conditions(c)["dry"] is False  # no weather data: never claim a dry spell
@@ -255,6 +278,7 @@ def test_condition_rules_and_forcing(settings):
             signals.set_forced(c, "heat", "maybe")
 
 
+# Check that 311 request fetching filters by age, area, status, and type.
 def test_fetch_311_filters_age_area_status_and_caps(settings):
     now = datetime(2026, 9, 19, tzinfo=timezone.utc)
     ms = lambda days: int((now - timedelta(days=days)).timestamp() * 1000)
@@ -270,6 +294,7 @@ def test_fetch_311_filters_age_area_status_and_caps(settings):
         signals.fetch_311(settings, FakeClient({"error": {"message": "boom"}}), now)
 
 
+# Check that a failed signal refresh keeps the previously stored data.
 def test_refresh_keeps_old_data_when_a_source_fails(settings):
     path = settings.data_dir / "app.db"
     with db.connect(path) as c:
@@ -286,6 +311,7 @@ def test_refresh_keeps_old_data_when_a_source_fails(settings):
 
 
 # ---------------------------------------------------------------- triggers
+# Build a test settings/db/satellite grid with the real feature snapshot loaded.
 @pytest.fixture
 def world(settings):
     path = settings.data_dir / "app.db"
@@ -295,6 +321,7 @@ def world(settings):
     return settings, path, sat
 
 
+# Apply an optional mutation then run the trigger sync and return its result.
 def sync(world_, mutate=None, now=NOW):
     settings, path, sat = world_
     with db.connect(path) as c:
@@ -303,18 +330,21 @@ def sync(world_, mutate=None, now=NOW):
         return triggers.sync_flags(c, settings, sat, now)
 
 
+# Query flags from the database, optionally filtered by column values.
 def flags(path, **where):
     with db.connect(path) as c:
         q = "SELECT * FROM flags WHERE 1=1" + "".join(f" AND {k}=?" for k in where)
         return [dict(r) for r in c.execute(q, tuple(where.values()))]
 
 
+# Sample weather metrics representing dry, wet, hot, and mild conditions.
 DRY = {"past7_mm": 0, "next2_mm": 0, "next3_mm": 0, "max_prob_next2": 0, "max_apparent_next3_c": 28, "max_temp_c": 30}
 WET = {"past7_mm": 20, "next2_mm": 30, "next3_mm": 35, "max_prob_next2": 95, "max_apparent_next3_c": 24, "max_temp_c": 24}
 HOT = {"past7_mm": 20, "next2_mm": 0, "next3_mm": 2, "max_prob_next2": 0, "max_apparent_next3_c": 37, "max_temp_c": 35}
 MILD = {"past7_mm": 20, "next2_mm": 0, "next3_mm": 2, "max_prob_next2": 0, "max_apparent_next3_c": 27, "max_temp_c": 25}
 
 
+# Check that a dry spell flags well-spread, high-need trees for watering.
 def test_dry_spell_flags_well_spread_high_need_trees(world):
     res = sync(world, lambda c: _store(c, weather=DRY))
     _, path, sat = world
@@ -328,6 +358,7 @@ def test_dry_spell_flags_well_spread_high_need_trees(world):
     assert ctx["reasons"][0]["code"] == "dry_spell" and ctx["satellite"]["ndvi"] is not None
 
 
+# Check that rain flags drains with urgency and heat flags cooling checks.
 def test_rain_flags_drains_with_urgency_and_heat_flags_cooling(world):
     sync(world, lambda c: _store(c, weather=WET))
     _, path, _ = world
@@ -339,6 +370,7 @@ def test_rain_flags_drains_with_urgency_and_heat_flags_cooling(world):
     assert flags(path, type="drain_clear", source="trigger", status="expired")  # rain passed
 
 
+# Check that stale cooling-check flags appear and clear once verified, then reappear after cooldown.
 def test_cooling_flags_appear_when_hours_are_stale_and_go_away_once_verified(world):
     sync(world, lambda c: _store(c, weather=MILD))
     _, path, _ = world
@@ -357,6 +389,7 @@ def test_cooling_flags_appear_when_hours_are_stale_and_go_away_once_verified(wor
     assert [f for f in flags(path, feature_id=fid) if f["status"] == "open"]  # stale again
 
 
+# Check that syncing twice creates nothing new and expires flags when conditions end.
 def test_sync_is_idempotent_and_expires_ended_conditions(world):
     sync(world, lambda c: _store(c, weather=DRY))
     _, path, _ = world
@@ -367,6 +400,7 @@ def test_sync_is_idempotent_and_expires_ended_conditions(world):
     assert res["expired"] >= triggers.TREE_LIMIT and not flags(path, type="tree_water", status="open")
 
 
+# Check that claimed flags stay open through condition changes and resolved ones wait out cooldown.
 def test_claimed_flags_survive_condition_changes_and_resolved_ones_wait_out_cooldown(world):
     sync(world, lambda c: _store(c, weather=DRY))
     _, path, _ = world
@@ -387,6 +421,7 @@ def test_claimed_flags_survive_condition_changes_and_resolved_ones_wait_out_cool
     assert flags(path, id=done["id"])[0]["status"] == "open"    # cooldown over, still dry: needs water again
 
 
+# Check that 311 requests become flags and close once the ticket is no longer reported.
 def test_311_requests_become_flags_and_close_when_ticket_closes(world):
     row = {"ref": "26-1", "srtype": "WW-Storm Inlet Choke", "flag_type": "drain_clear", "category": "storm_inlet_choke", "status": "Open",
            "created": "2026-09-15T10:00:00+00:00", "address": "3100 CHARLES ST", "neighborhood": "Charles Village", "lat": 39.33, "lon": -76.615}
@@ -398,6 +433,7 @@ def test_311_requests_become_flags_and_close_when_ticket_closes(world):
     assert flags(path, source="311")[0]["status"] == "expired"
 
 
+# Check that user report flags expire on their scheduled time.
 def test_user_report_flags_expire_on_schedule(world):
     _, path, _ = world
     past = (NOW - timedelta(hours=1)).isoformat()
@@ -410,6 +446,7 @@ def test_user_report_flags_expire_on_schedule(world):
     assert flags(path, source_ref="r1")[0]["status"] == "expired"
 
 
+# Check that the active flag cap drops the lowest priority flags.
 def test_flag_cap_drops_lowest_priority(world, monkeypatch):
     monkeypatch.setattr(triggers, "MAX_ACTIVE_FLAGS", 20)
     sync(world, lambda c: _store(c, weather=DRY))
@@ -418,6 +455,7 @@ def test_flag_cap_drops_lowest_priority(world, monkeypatch):
 
 
 # ---------------------------------------------------------------- users
+# Check nickname validation and normalization rules.
 def test_nickname_rules(settings):
     with db.connect(settings.data_dir / "app.db") as c:
         assert users.create_user(c, "  Maya  R. ", "es")["lang"] == "en"  # English is the only language
@@ -431,6 +469,7 @@ def test_nickname_rules(settings):
         assert users.create_user(c, "Sam", "xx")["lang"] == "en"
 
 
+# Check streak counting logic and the streak badge.
 def test_streak_logic_and_badges(settings):
     with db.connect(settings.data_dir / "app.db") as c:
         u = users.create_user(c, "Streaker", "en")
@@ -446,12 +485,14 @@ def test_streak_logic_and_badges(settings):
         assert c.execute("SELECT best_streak FROM users WHERE id=?", (u["id"],)).fetchone()[0] == 3
 
 
+# Check that the day boundary is computed using local time, falling back to UTC for bad zones.
 def test_day_boundary_uses_local_time(settings):
     late = datetime(2026, 9, 20, 3, 30, tzinfo=timezone.utc)  # 11:30 pm on the 19th in Baltimore
     assert users.local_day(late, "America/New_York").isoformat() == "2026-09-19"
     assert users.local_day(late, "Not/AZone").isoformat() == "2026-09-20"  # bad zone falls back to UTC
 
 
+# Check point awarding, the weekly window, and leaderboard ordering.
 def test_points_leaderboard_and_weekly_window(settings):
     with db.connect(settings.data_dir / "app.db") as c:
         a, b = users.create_user(c, "Ana", "en"), users.create_user(c, "Ben", "en")
@@ -464,6 +505,7 @@ def test_points_leaderboard_and_weekly_window(settings):
 
 
 # ---------------------------------------------------------------- evaluation helpers
+# Check the eval script's classification and metric-summary helpers.
 def test_eval_validation_metrics_and_classification():
     from eval.eval_validation import classify, summarize
     from tests.helpers import Scripted
@@ -482,6 +524,7 @@ def test_eval_validation_metrics_and_classification():
     assert summarize([])["accuracy"] is None
 
 
+# Check the eval script's tercile table and database row collection helpers.
 def test_eval_satellite_terciles():
     from eval.eval_satellite import collect, tercile_table
     rows = [(0.1, "no"), (0.2, "no"), (0.3, "yes"), (0.5, "no"), (0.6, "yes"), (0.7, "yes"), (0.8, "yes"), (0.9, "yes"), (0.95, "yes"), (0.4, "unsure"), (None, "yes")]

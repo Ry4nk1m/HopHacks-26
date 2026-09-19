@@ -21,12 +21,14 @@ COOLING = ("https://services1.arcgis.com/UWYHeuuJISiGmgXx/arcgis/rest/services/"
            "Code_Red_Cooling_Center_New/FeatureServer/0/query")
 
 
+# Send an HTTP request (POST if data is given, otherwise GET) and return the parsed JSON body.
 def fetch(url, data=None, timeout=120):
     req = urllib.request.Request(url, data=data, headers=UA)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read())
 
 
+# Query Overpass for trees, storm drains, and community spaces inside the area, and normalize them into feature dicts.
 def osm_features(aoi):
     w, s, e, n = aoi
     bbox = f"{s},{w},{n},{e}"
@@ -47,6 +49,7 @@ out center tags;"""
         lon = el.get("lon") or (el.get("center") or {}).get("lon")
         if lat is None or lon is None:
             continue
+        # Classify each element by its tags into a feature kind.
         if tags.get("natural") == "tree":
             kind = "tree"
         elif tags.get("man_made") == "storm_drain" or tags.get("manhole") == "drain":
@@ -65,6 +68,7 @@ out center tags;"""
     return out
 
 
+# Fetch Baltimore's Code Red cooling center locations and normalize them into feature dicts.
 def cooling_centers():
     params = {"where": "1=1", "outFields": "*", "outSR": 4326, "f": "json", "resultRecordCount": 500}
     data = fetch(COOLING + "?" + urllib.parse.urlencode(params))
@@ -82,6 +86,7 @@ def cooling_centers():
     return out
 
 
+# Fetch OSM and cooling center features, tally counts by kind, and write the combined snapshot to disk.
 def main():
     aoi = load_settings().aoi
     feats = osm_features(aoi) + cooling_centers()

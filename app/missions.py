@@ -1,3 +1,6 @@
+# Core mission logic: accepting flags, arriving, submitting photos, and admin review.
+# A mission is a user's attempt to complete or confirm a flag (a reported issue on the map).
+
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -7,16 +10,19 @@ from .geo import haversine_m, valid_coord
 from .validation import ValidatorUnavailable, Verdict
 
 
+# Error raised when a mission action is not allowed, with a code and http status.
 class MissionError(Exception):
     def __init__(self, code, status=400, **extra):
         super().__init__(code)
         self.code, self.status, self.extra = code, status, extra
 
 
+# Format a datetime as an ISO string with no microseconds, for storing in the database.
 def _iso(now):
     return now.replace(microsecond=0).isoformat()
 
 
+# Turn a mission database row into a plain dict for the API response.
 def mission_to_dict(row):
     d = dict(row)
     return {
@@ -27,6 +33,7 @@ def mission_to_dict(row):
     }
 
 
+# Load a mission by id and make sure it belongs to this user, or raise an error.
 def _own_mission(conn, user_id, mission_id):
     m = conn.execute("SELECT * FROM missions WHERE id=?", (mission_id,)).fetchone()
     if m is None or m["user_id"] != user_id:
@@ -34,6 +41,7 @@ def _own_mission(conn, user_id, mission_id):
     return dict(m)
 
 
+# Turn a GPS accuracy value into extra allowed distance, capped at a max.
 def _allowance(accuracy):
     try:
         return max(0.0, min(float(accuracy or 0), rules.ACCURACY_ALLOWANCE_CAP_M))
@@ -41,12 +49,14 @@ def _allowance(accuracy):
         return 0.0
 
 
+# List a user's missions that are still in progress (accepted or arrived) recently.
 def active_missions(conn, user_id, now):
     cutoff = _iso(now - timedelta(hours=3))
     return [mission_to_dict(r) for r in conn.execute(
         "SELECT * FROM missions WHERE user_id=? AND status IN ('accepted','arrived') AND created_at >= ? ORDER BY id DESC", (user_id, cutoff))]
 
 
+# Let a user claim an open flag as a new mission, or resume one they already have.
 def accept(conn, user, flag_id, now):
     flag = get_flag(conn, flag_id)
     if not flag or flag["status"] != "open":
@@ -75,6 +85,7 @@ def accept(conn, user, flag_id, now):
     return mission_to_dict(conn.execute("SELECT * FROM missions WHERE id=?", (cur.lastrowid,)).fetchone())
 
 
+# Cancel a mission the user has not finished yet, and free up the flag.
 def cancel(conn, user, mission_id, now):
     m = _own_mission(conn, user["id"], mission_id)
     if m["status"] not in ("accepted", "arrived"):
@@ -84,6 +95,8 @@ def cancel(conn, user, mission_id, now):
     return mission_to_dict(conn.execute("SELECT * FROM missions WHERE id=?", (mission_id,)).fetchone())
 
 
+# Mark a mission as arrived if the user's location is close enough to the flag.
+# Allows a manual override for a slightly larger distance if flagged as manual.
 def arrive(conn, user, mission_id, lat, lon, accuracy, manual, now):
     if not valid_coord(lat, lon):
         raise MissionError("bad_location", 422)
@@ -128,12 +141,14 @@ def decide(verdict, purpose, manual_arrival):
     return "rejected", "low_confidence"
 
 
+# Build the standard response dict returned from a photo submission.
 def _result(outcome, code, verdict=None, mission=None, flag=None, **extra):
     return {"outcome": outcome, "code": code, "retry": outcome == "rejected" and (mission is None or mission.get("remaining_attempts", 0) > 0),
             "reasoning": verdict.reasoning if verdict else "", "verdict": verdict.model_dump() if verdict else None,
             "mission": mission, "flag": flag, **extra}
 
 
+# Handle a photo submission for a mission: check it, run it past the validator, then save the result.
 def submit(settings, validator, user_id, mission_id, photo_bytes, before_bytes, lat, lon, accuracy, was_problem, lang, now=None):
     now = now or datetime.now(timezone.utc)
     db_path = settings.data_dir / "app.db"
@@ -271,6 +286,7 @@ def award_reporter_if_due(conn, flag_id, now):
 
 # ---------------------------------------------------------------- admin review queue
 
+# List all missions waiting for an admin to review them.
 def pending_reviews(conn):
     out = []
     for r in conn.execute("SELECT m.*, f.type AS flag_type, f.title, u.nickname FROM missions m JOIN flags f ON f.id=m.flag_id "
@@ -282,6 +298,7 @@ def pending_reviews(conn):
     return out
 
 
+# Apply an admin's approve/reject decision on a pending mission.
 def review_decide(conn, settings, mission_id, approve, note, now):
     m = conn.execute("SELECT * FROM missions WHERE id=?", (mission_id,)).fetchone()
     if m is None or m["status"] != "pending":

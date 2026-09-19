@@ -1,3 +1,5 @@
+// Main mission flows: viewing a flag, accepting it, arriving, submitting a photo for verification, and reporting a problem.
+
 import { S } from './state.js';
 import { emit, on } from './bus.js';
 import { api } from './api.js';
@@ -7,17 +9,23 @@ import { getPos, freshPos, haversine } from './geo.js';
 import { speak, stopVoice } from './voice.js';
 
 // ------------------------------------------------------------------ small helpers
+// The flag tied to the current mission, refreshed from the latest flag list if possible.
 const missionFlag = () => (S.mission ? S.flags.find((f) => f.id === S.mission.flag.id) || S.mission.flag : null);
+// Distance from the user to a flag, or null if either position is unknown.
 const distTo = (flag) => { const p = getPos(); return p && flag ? haversine(p.lat, p.lon, flag.lat, flag.lon) : null; };
+// Which task instructions to show for a flag.
 const taskKey = (flag) => (flag.purpose === 'confirm' ? 'task_confirm' : `task_${flag.type}`);
+// Build a Google Maps walking directions link to a flag.
 const mapsUrl = (f) => `https://www.google.com/maps/dir/?api=1&destination=${f.lat},${f.lon}&travelmode=walking`;
 
+// Format a list of dates as a single date or a range, for satellite scene captions.
 function dateRange(dates) {
   if (!dates || !dates.length) return '';
   const s = [...dates].sort();
   return s.length === 1 || s[0] === s[s.length - 1] ? dateShort(s[0]) : `${dateShort(s[0])} – ${dateShort(s[s.length - 1])}`;
 }
 
+// Turn a flag's "reason" code and data into a readable sentence.
 function reasonText(r) {
   switch (r.code) {
     case 'dry_spell': return t('r_dry_spell', { past: r.past7_mm != null ? Math.round(r.past7_mm) : '?', next: r.next3_mm != null ? Math.round(r.next3_mm) : '?' });
@@ -30,6 +38,7 @@ function reasonText(r) {
   }
 }
 
+// Build the satellite info box (vegetation/heat readings) for a flag, or null if there is no data.
 function satBlock(sat) {
   if (!sat || sat.ndvi == null) return null;
   const veg = sat.veg_low_pct >= 0.66 ? t('sat_veg_low') : sat.veg_low_pct <= 0.33 ? t('sat_veg_high') : t('sat_veg_mid');
@@ -40,6 +49,7 @@ function satBlock(sat) {
     el('small', {}, t('sat_src', { ndvi: dateRange(sat.ndvi_dates), lst: dateRange(sat.lst_dates) })));
 }
 
+// Build the info box for a cooling center's address, hours, phone, and verification status.
 function featureBlock(flag) {
   const f = (flag.context || {}).feature;
   if (!f || flag.type !== 'cooling_check') return null;
@@ -55,11 +65,13 @@ function featureBlock(flag) {
   return rows.length ? el('div', { class: 'box' }, rows) : null;
 }
 
+// Draw the colored round icon used to represent a flag type.
 function typeDot(type, size) {
   return el('div', { class: 'type-dot', style: { background: TYPE_COLOR[type], color: TYPE_GLYPH[type], width: `${size || 42}px`, height: `${size || 42}px` } }, icon(TYPE_ICON[type], 22));
 }
 
 // ------------------------------------------------------------------ flag detail
+// Show the sheet with a flag's full details: tags, reasons, task instructions, and the accept/confirm button.
 export function openFlagSheet(flagId) {
   const flag = S.flags.find((f) => f.id === flagId);
   if (!flag) return;
@@ -103,6 +115,7 @@ export function openFlagSheet(flagId) {
     sheetOpts({ onClose: () => emit('flag:highlight', null) }));
 }
 
+// Confirm an unconfirmed flag is still there, using the user's current location.
 async function quickConfirm(flag) {
   try {
     const p = await freshPos();
@@ -117,12 +130,15 @@ async function quickConfirm(flag) {
 }
 
 // ------------------------------------------------------------------ mission
+// Local state for the in-progress mission UI: photos taken, submission status, and the last result.
 const MS = { id: null, photo: null, before: null, wasProblem: null, busy: false, result: null, resultFlag: null, arriving: false, lastAuto: 0 };
 
+// Reset the mission UI state for a new (or restored) mission.
 function resetMissionState(id) {
   Object.assign(MS, { id, photo: null, before: null, wasProblem: null, busy: false, result: null, resultFlag: null, arriving: false, lastAuto: 0 });
 }
 
+// Accept a flag as a new mission and open the mission sheet.
 async function acceptFlag(flag) {
   try {
     const r = await api(`/api/flags/${flag.id}/accept`, { method: 'POST' });
@@ -138,22 +154,26 @@ async function acceptFlag(flag) {
   }
 }
 
+// Restore a mission that was already active (e.g. after a page reload).
 export function restoreMission(mission, flag) {
   resetMissionState(mission.id);
   S.mission = { mission, flag };
   emit('mission:changed');
 }
 
+// Draw the 3-dot progress bar showing accepted / arrived / verified state.
 function stepsBar(state) {
   const done = [state !== 'accepted', !!MS.photo && state !== 'accepted', !!(MS.result && MS.result.outcome === 'verified')];
   return el('div', { class: 'steps' }, done.map((d) => el('div', { class: `step${d ? ' done' : ''}` })));
 }
 
+// A tappable box that shows a taken photo, or a camera icon and label if none yet.
 function photoSlot(label, photo, onPick) {
   return el('button', { class: `photo-slot${photo ? ' filled' : ''}`, onclick: onPick, 'aria-label': label },
     photo ? el('img', { src: photo.url, alt: '' }) : [icon('camera', 26), el('span', {}, label)]);
 }
 
+// Shrink and compress a photo before upload; falls back to the original file if that fails.
 async function prepPhoto(file) {
   try {
     const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -185,6 +205,7 @@ function pickPhoto() {
   });
 }
 
+// Show the mission sheet: directions while heading there, or the photo/checklist form once arrived.
 export function openMissionSheet() {
   if (!S.mission && !MS.result) return;
   if (MS.result) { renderResult(); return; }
@@ -224,6 +245,7 @@ export function openMissionSheet() {
   openSheet(...body, sheetOpts({ dismissible: !MS.busy }));
 }
 
+// Text telling the user how far they still need to walk to reach the flag.
 function hintText(flag) {
   const p = getPos();
   if (!p) return t('m_gps_waiting');
@@ -231,6 +253,7 @@ function hintText(flag) {
   return t('m_far', { d: fmtDist(distTo(flag)), r: fmtDist(need) });
 }
 
+// Refresh the live distance readout in the mission sheet as the GPS position updates.
 export function updateMissionLive() {
   const flag = missionFlag();
   if (!S.mission || !flag) return;
@@ -240,6 +263,7 @@ export function updateMissionLive() {
   maybeArrive();
 }
 
+// Automatically mark the mission as arrived once the user is close enough, without needing a tap.
 function maybeArrive() {
   if (!S.mission || S.mission.mission.status !== 'accepted' || MS.arriving || Date.now() - MS.lastAuto < 8000) return;
   const flag = missionFlag(), p = getPos(), d = distTo(flag);
@@ -247,6 +271,7 @@ function maybeArrive() {
   if (d <= flag.radius_m + Math.min(p.acc || 0, S.cfg.rules.accuracy_cap_m) + 5) arrive(false);
 }
 
+// Tell the server the user has arrived at the mission site (either tapped manually or detected automatically).
 async function arrive(manual) {
   if (!S.mission || MS.arriving) return;
   MS.arriving = true; MS.lastAuto = Date.now();
@@ -268,6 +293,7 @@ async function arrive(manual) {
   } finally { MS.arriving = false; }
 }
 
+// Cancel the active mission.
 async function cancelMission() {
   if (!S.mission) return;
   try { await api(`/api/missions/${S.mission.mission.id}/cancel`, { method: 'POST' }); } catch (e) { /* already gone */ }
@@ -278,6 +304,7 @@ async function cancelMission() {
   emit('flags:refresh');
 }
 
+// Submit the mission's photo(s) and answers for photo verification.
 async function submitMission() {
   if (!S.mission) return;
   if (!MS.photo) { toast(t('m_need_photo')); return; }
@@ -311,6 +338,7 @@ async function submitMission() {
 
 const OUTCOME_ICON = { verified: 'check', pending: 'refresh', rejected: 'x', error: 'alert' };
 
+// Build the verdict view shown after a mission or report is checked (verified, pending, rejected, or error).
 function resultView(r, flag, onRetry, onDone) {
   const title = { verified: t('v_verified'), pending: t('v_pending'), rejected: t('v_rejected'), error: t('v_error') }[r.outcome] || t('v_error');
   const cls = OUTCOME_ICON[r.outcome] ? r.outcome : 'error';
@@ -331,6 +359,7 @@ function resultView(r, flag, onRetry, onDone) {
   ];
 }
 
+// Show the mission result sheet.
 function renderResult() {
   const r = MS.result;
   openSheet(...resultView(r, MS.resultFlag,
@@ -339,13 +368,16 @@ function renderResult() {
 }
 
 // ------------------------------------------------------------------ report a problem
+// Local state for the "report a problem" form.
 const RS = { type: 'problem_report', photo: null, note: '', busy: false, result: null };
 
+// Open the "report a problem" sheet, starting fresh.
 export function openReportSheet() {
   RS.result = null;
   renderReport();
 }
 
+// Draw the report form, or the result screen if a report was just submitted.
 function renderReport() {
   const p = getPos();
   if (RS.result) {
@@ -385,6 +417,7 @@ function renderReport() {
     sheetOpts({ dismissible: !RS.busy }));
 }
 
+// Submit the problem report with its photo and location.
 async function submitReport() {
   if (!RS.photo || RS.busy) return;
   RS.busy = true; renderReport();

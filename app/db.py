@@ -1,3 +1,6 @@
+# Database setup and small helpers.
+# Defines the SQLite schema and gives out connections that auto commit or roll back.
+
 import secrets
 import sqlite3
 import threading
@@ -5,6 +8,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
+# SQL that creates all tables and indexes used by the app, if they do not exist yet.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,22 +81,28 @@ CREATE INDEX IF NOT EXISTS idx_missions_flag ON missions (flag_id);
 CREATE INDEX IF NOT EXISTS idx_points_user ON point_events (user_id, created_at);
 """
 
+# Lock and set used so the schema is only created once per database file.
 _init_lock = threading.Lock()
 _initialised = set()
 
 
+# Current UTC time as an ISO string, with no microseconds.
 def now_iso():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+# Make a random, hard to guess token for user login.
 def new_token():
     return secrets.token_urlsafe(24)
 
 
+# Make a short random id, used for feature ids.
 def new_id():
     return uuid.uuid4().hex[:12]
 
 
+# Open a database connection, creating the schema on first use.
+# Commits on success, rolls back on error, and always closes the connection.
 @contextmanager
 def connect(db_path):
     db_path = str(db_path)
@@ -115,10 +125,12 @@ def connect(db_path):
         conn.close()
 
 
+# Turn a cursor's rows into a list of plain dicts.
 def rows(cursor):
     return [dict(r) for r in cursor.fetchall()]
 
 
+# Parse an ISO date string into a datetime, or None if empty.
 def parse_iso(value):
     if not value:
         return None

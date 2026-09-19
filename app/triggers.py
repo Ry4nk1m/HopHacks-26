@@ -1,3 +1,6 @@
+# Decides which flags (trees needing water, drains, cooling spaces, city reports) should
+# currently be active, and syncs that list into the database.
+
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -11,6 +14,7 @@ TREE_STRONG_NEED = 0.70
 MAX_ACTIVE_FLAGS = 300
 
 
+# Format a datetime as an ISO string without microseconds.
 def _iso(dt):
     return dt.replace(microsecond=0).isoformat()
 
@@ -25,6 +29,8 @@ def select_priority_trees(trees, satellite, exclude_ids, limit=TREE_LIMIT, min_s
         if need is not None:
             scored.append((need, t))
     scored.sort(key=lambda p: (-p[0], p[1]["id"]))
+    # Group trees into a grid of cells so the "too close to an already-picked tree" check only
+    # has to look at nearby cells instead of every tree picked so far.
     chosen, cells = [], {}
     for need, t in scored:
         ci, cj = int(t["lat"] / 0.001), int(t["lon"] / 0.001)
@@ -38,10 +44,12 @@ def select_priority_trees(trees, satellite, exclude_ids, limit=TREE_LIMIT, min_s
     return chosen
 
 
+# Sample satellite data for a location, or None if there is no satellite grid loaded.
 def _sat(satellite, lat, lon):
     return satellite.sample(lat, lon) if satellite else None
 
 
+# Higher urgency for heavier rain, plus one more if there is an active flood alert.
 def _drain_urgency(cond):
     mm = cond["rain_mm"]
     u = 3 if mm >= 25 else 2 if mm >= 12 else 1
@@ -52,6 +60,7 @@ def build_specs(conn, settings, satellite, cond, now):
     """Everything that should currently be flagged, keyed by (type, source, source_ref)."""
     specs = {}
 
+    # Register one flag spec, keyed by its type, source, and source reference.
     def add(**s):
         s.setdefault("priority", round(s["urgency"] + 0.0, 3))
         specs[(s["type"], s["source"], s["source_ref"])] = s
@@ -115,31 +124,37 @@ def build_specs(conn, settings, satellite, cond, now):
     return specs
 
 
+# Create, update, or reopen the flag matching this spec, depending on its current status.
 def _apply(conn, spec, now):
     row = conn.execute("SELECT * FROM flags WHERE type=? AND source=? AND source_ref=?",
                        (spec["type"], spec["source"], spec["source_ref"])).fetchone()
     ctx = json.dumps(spec["context"])
     stamp = _iso(now)
+    # No matching flag yet, so create a new one.
     if row is None:
         conn.execute("INSERT INTO flags (type, source, source_ref, feature_id, title, lat, lon, urgency, priority, status, context, created_at, updated_at) "
                      "VALUES (?,?,?,?,?,?,?,?,?, 'open', ?,?,?)",
                      (spec["type"], spec["source"], spec["source_ref"], spec["feature_id"], spec["title"], spec["lat"], spec["lon"],
                       spec["urgency"], spec["priority"], ctx, stamp, stamp))
         return "created"
+    # Already active, so just refresh its details.
     if row["status"] in ("open", "pending"):
         conn.execute("UPDATE flags SET urgency=?, priority=?, context=?, title=?, updated_at=? WHERE id=?",
                      (spec["urgency"], spec["priority"], ctx, spec["title"], stamp, row["id"]))
         return "updated"
+    # Recently resolved flags of this type stay closed for a cooldown period before reopening.
     if row["status"] == "resolved":
         days = rules.FLAG_TYPES[spec["type"]].get("cooldown_days", 7)
         if row["resolved_at"] and row["resolved_at"] > _iso(now - timedelta(days=days)):
             return "cooldown"
+    # Otherwise, reopen the flag with fresh details.
     conn.execute("UPDATE flags SET status='open', urgency=?, priority=?, context=?, title=?, updated_at=?, resolved_at=NULL, "
                  "claimed_by=NULL, claim_expires_at=NULL, verified_count=0 WHERE id=?",
                  (spec["urgency"], spec["priority"], ctx, spec["title"], stamp, row["id"]))
     return "reopened"
 
 
+# Main entry point: rebuild the current flag list from live conditions and clean up stale flags.
 def sync_flags(conn, settings, satellite, now=None):
     now = now or datetime.now(timezone.utc)
     stamp = _iso(now)
@@ -157,9 +172,12 @@ def sync_flags(conn, settings, satellite, now=None):
             continue
         conn.execute("UPDATE flags SET status='expired', updated_at=? WHERE id=?", (stamp, r["id"]))
         stats["expired"] += 1
+    # Also expire flags that reached their own expiration time.
     stats["expired"] += conn.execute("UPDATE flags SET status='expired', updated_at=? WHERE status='open' AND expires_at IS NOT NULL AND expires_at < ?",
                                      (stamp, stamp)).rowcount
+    # Clear out expired claims so other users can claim those flags.
     conn.execute("UPDATE flags SET claimed_by=NULL, claim_expires_at=NULL WHERE claim_expires_at IS NOT NULL AND claim_expires_at < ?", (stamp,))
+    # Expire missions that have been sitting in progress for too long.
     conn.execute("UPDATE missions SET status='expired' WHERE status IN ('accepted','arrived') AND created_at < ?", (_iso(now - timedelta(hours=3)),))
 
     # keep the map light: drop the lowest-priority managed flags if the total gets out of hand

@@ -1,3 +1,6 @@
+# Handles user-submitted reports (flooding, problems, etc): checks the photo and location,
+# runs the AI validator, then creates a flag. Also handles confirming someone else's report.
+
 import json
 import re
 import uuid
@@ -9,13 +12,17 @@ from .geo import haversine_m, in_bbox, valid_coord
 from .missions import MissionError, _allowance, award_reporter_if_due
 from .validation import ValidatorUnavailable
 
+# Display titles shown for each auto-detected report type.
 TITLES = {"flood_report": "Reported flooding", "problem_report": "Reported problem"}
 
 
+# Squash extra whitespace and cut the note down to 200 characters.
 def _clean_note(note):
     return re.sub(r"\s+", " ", (note or "")).strip()[:200]
 
 
+# Handle a new report submission: validate the input, check the photo with the AI validator,
+# and create a flag if everything checks out.
 def create_report(settings, validator, user_id, photo_bytes, claimed_type, note, lat, lon, accuracy, lang, now=None):
     now = now or datetime.now(timezone.utc)
     db_path = settings.data_dir / "app.db"
@@ -30,11 +37,13 @@ def create_report(settings, validator, user_id, photo_bytes, claimed_type, note,
         raise MissionError("weak_gps", 422)
     lang = lang if lang in rules.LANGS else "en"
     note = _clean_note(note)
+    # Decode and validate the uploaded photo file itself.
     try:
         photo = photos.process_upload(photo_bytes)
     except photos.PhotoError as exc:
         return {"outcome": "rejected", "code": exc.code, "retry": True}
 
+    # Reject if a very similar report already exists nearby, or the same photo was used before.
     with db.connect(db_path) as conn:
         for r in conn.execute("SELECT id, lat, lon FROM flags WHERE type=? AND status IN ('open','pending')", (claimed_type,)):
             if haversine_m(lat, lon, r["lat"], r["lon"]) <= rules.REPORT_DEDUPE_M:
@@ -42,11 +51,13 @@ def create_report(settings, validator, user_id, photo_bytes, claimed_type, note,
         if photos.find_duplicate(conn, photo, None, user_id):
             return {"outcome": "rejected", "code": "duplicate_photo", "retry": True}
 
+    # Ask the AI validator to look at the photo and decide if it matches the claim.
     try:
         verdict = validator.check("report", claimed_type, [photo.jpeg], {"claimed_type": claimed_type, "note": note}, lang)
     except ValidatorUnavailable:
         return {"outcome": "error", "code": "validator_unavailable", "retry": True}
 
+    # Reject the report if the validator finds any problem with the photo or subject.
     base = {"reasoning": verdict.reasoning, "verdict": verdict.model_dump()}
     if verdict.contains_people or verdict.contains_pii:
         return {"outcome": "rejected", "code": "privacy", "retry": True, **base}
@@ -59,14 +70,17 @@ def create_report(settings, validator, user_id, photo_bytes, claimed_type, note,
     if verdict.confidence < rules.REVIEW_MIN:
         return {"outcome": "rejected", "code": "low_confidence", "retry": True, **base}
 
+    # Work out the final report type and urgency from what the validator saw.
     ftype = "flood_report" if verdict.category == "flooded_road" else ("problem_report" if verdict.category not in (None, "none") else claimed_type)
     urgency = max(verdict.severity or 1, 2 if ftype == "flood_report" else 1)
+    # High confidence reports are trusted right away instead of waiting for someone to confirm.
     auto = verdict.confidence >= rules.REPORT_AUTO_CONFIRM_MIN
     stamp = now.replace(microsecond=0).isoformat()
     expires = (now + timedelta(hours=rules.FLAG_TYPES[ftype]["expire_hours"])).replace(microsecond=0).isoformat()
     context = {"reasons": [{"code": "user_report"}], "satellite": None,
                "report": {"category": verdict.category, "note": note, "severity": verdict.severity, "confidence": verdict.confidence,
                           "reasoning": verdict.reasoning, "awarded": False}}
+    # Save the photo and the new flag, then update the reporter's streak, points, and badges.
     with db.connect(db_path) as conn:
         rel = photos.save_photo(settings, photo.jpeg)
         cur = conn.execute(
@@ -89,12 +103,14 @@ def confirm_flag(conn, user, flag_id, lat, lon, accuracy, now, settings):
     if not valid_coord(lat, lon):
         raise MissionError("bad_location", 422)
     flag = get_flag(conn, flag_id)
+    # Make sure the flag is still open, is a user report, and isn't already confirmed or your own.
     if not flag or flag["status"] != "open" or flag["source"] != "user":
         raise MissionError("flag_unavailable", 409)
     if flag["reporter_id"] == user["id"]:
         raise MissionError("own_report", 403)
     if flag["verified_count"] >= 1:
         raise MissionError("already_confirmed", 409)
+    # The confirmer must actually be near the reported spot, allowing for GPS accuracy.
     dist = haversine_m(float(lat), float(lon), flag["lat"], flag["lon"])
     radius = rules.CONFIRM_RADIUS_M + _allowance(accuracy)
     if dist > radius:

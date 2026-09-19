@@ -1,3 +1,5 @@
+// The first-time onboarding flow: welcome, pick a nickname, safety pledges, then enable location.
+
 import { S, store } from './state.js';
 import { api, token } from './api.js';
 import { el, icon, setKids } from './ui.js';
@@ -21,6 +23,7 @@ const HERO = `<svg viewBox="0 0 240 200" xmlns="http://www.w3.org/2000/svg" role
   <circle cx="40" cy="150" r="7" fill="#e46a46"/><circle cx="196" cy="140" r="7" fill="#234831"/><circle cx="176" cy="176" r="5" fill="#152e34" fill-opacity=".55"/>
 </svg>`;
 
+// Build and show the onboarding screen. Calls onDone once the user finishes and an account is created.
 export function showOnboarding(onDone) {
   const old = document.querySelector('.ob');
   if (old) old.remove();
@@ -33,20 +36,25 @@ export function showOnboarding(onDone) {
   root.append(top, hero, card);
   document.getElementById('app').append(root);
 
+  // Move to a given step and redraw the card.
   const go = (n) => { ob.step = n; ob.error = ''; renderCard(); card.scrollTop = 0; };
 
+  // Draw the top bar with the app logo and name.
   function renderTop() {
     setKids(top,
       el('div', { class: 'ob-brand' }, el('div', { class: 'ob-logo' }, icon('pin', 18)), el('span', {}, S.cfg.app_name)));
   }
 
+  // Draw the step progress dots at the top of the card.
   function dots() {
     return el('div', { class: 'ob-dots', role: 'img', 'aria-label': t('ob_step', { n: ob.step + 1, t: TOTAL_STEPS }) },
       Array.from({ length: TOTAL_STEPS }, (_, i) => el('span', { class: i === ob.step ? 'on' : i < ob.step ? 'done' : '' })));
   }
 
+  // A "back" button, shown on every step except the first.
   function back() { return ob.step > 0 ? el('button', { class: 'ghost', onclick: () => go(ob.step - 1) }, t('ob_back')) : null; }
 
+  // Step 1: welcome screen explaining how the app works.
   function stepWelcome() {
     const how = [['globe', 'ob_how1_t', 'ob_how1_d'], ['pin', 'ob_how2_t', 'ob_how2_d'], ['camera', 'ob_how3_t', 'ob_how3_d']];
     return [
@@ -56,11 +64,13 @@ export function showOnboarding(onDone) {
       el('button', { class: 'cta', onclick: () => go(1) }, t('ob_start'))];
   }
 
+  // Check the typed nickname is valid; returns the cleaned-up name or null if not valid.
   function validName() {
     const n = ob.name.replace(/\s+/g, ' ').trim();
     return NAME_RE.test(n) && HAS_LETTER.test(n) ? n : null;
   }
 
+  // Step 2: pick a nickname and turn voice guidance on or off.
   function stepName() {
     const initial = (ob.name.trim()[0] || '?').toUpperCase();
     const avatar = el('div', { class: 'avatar' }, initial);
@@ -87,6 +97,7 @@ export function showOnboarding(onDone) {
       } }, t('ob_continue')), back()];
   }
 
+  // Step 3: safety pledges, each one must be tapped to agree before continuing.
   function stepSafety() {
     const items = [['shield', 'safe_1'], ['camera', 'safe_2'], ['alert', 'safe_3']];
     const cta = el('button', { class: 'cta', disabled: !ob.agreed.every(Boolean), onclick: () => go(3) }, t('ob_agree'));
@@ -109,6 +120,7 @@ export function showOnboarding(onDone) {
       el('div', { class: 'ob-how' }, rows), cta, back()];
   }
 
+  // Create the user account, save the token, and hand off to the app once onboarding is done.
   async function finish(locChoice) {
     if (ob.busy) return;
     ob.busy = true; renderCard();
@@ -128,6 +140,7 @@ export function showOnboarding(onDone) {
     }
   }
 
+  // Step 4: ask the user to turn on location, or skip it.
   function stepLocation() {
     return [
       el('div', { class: 'loc-ic' }, el('span', { class: 'ping' }), icon('pin', 34)),
@@ -139,6 +152,7 @@ export function showOnboarding(onDone) {
   }
 
   let lastStep = -1;
+  // Redraw the card for the current step, keeping scroll position if the step did not change.
   function renderCard() {
     const body = [stepWelcome, stepName, stepSafety, stepLocation][ob.step]();
     const same = lastStep === ob.step;

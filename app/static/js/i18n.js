@@ -1,5 +1,8 @@
+// Text strings for the app (English only right now) and small helpers to look them up and fill in values.
+
 import { S, store } from './state.js';
 
+// All display text, keyed by short id. {name} placeholders get filled in by t().
 const EN = {
   app_name: 'Parasol', by_club: 'A {site} project', boot_map: 'Loading map…',
   onboard_title: 'Small tasks, real neighborhood impact',
@@ -126,18 +129,22 @@ const EN = {
   credit_ai: 'Photo checks: Google Gemini. Voice: ElevenLabs.',
 };
 
+// Look up a text string by key, filling in any {placeholder} values. Falls back to the key itself if missing.
 export function t(key, vars) {
   let s = EN[key] || key;
   if (vars) for (const [k, v] of Object.entries(vars)) s = s.split(`{${k}}`).join(String(v));
   return s;
 }
 
+// Check if a text key exists.
 export const has = (key) => Object.prototype.hasOwnProperty.call(EN, key);
 
+// Get the label for a report category, falling back to a generic "other" label.
 export function catLabel(code) {
   return has(`cat_${code}`) ? t(`cat_${code}`) : t('cat_other');
 }
 
+// Build the display title for a flag, based on its type and context.
 export function flagTitle(flag) {
   const ctx = flag.context || {};
   if (flag.type === 'cooling_check') {
@@ -149,6 +156,7 @@ export function flagTitle(flag) {
   return t(`type_${flag.type}`);
 }
 
+// Get the user-facing message for an API result code, falling back to a generic error message.
 export function codeMessage(code) {
   const k = `code_${code}`;
   return has(k) ? t(k) : t('code_generic');

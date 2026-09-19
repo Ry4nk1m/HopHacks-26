@@ -1,6 +1,9 @@
+// Small UI toolkit: building DOM elements, icons, toasts, the bottom sheet, and text formatting helpers.
+
 import { S } from './state.js';
 import { t } from './i18n.js';
 
+// Create a DOM element with the given tag, attributes/props, and children.
 export function el(tag, props, ...kids) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(props || {})) {
@@ -18,10 +21,12 @@ export function el(tag, props, ...kids) {
   return n;
 }
 
+// Replace a node's children with the given list, skipping any null/false entries.
 export function setKids(node, ...kids) {
   node.replaceChildren(...kids.flat(Infinity).filter((k) => k != null && k !== false).map((k) => (k.nodeType ? k : document.createTextNode(String(k)))));
 }
 
+// SVG path data for each icon, keyed by name.
 const ICONS = {
   x: ['M18 6L6 18M6 6l12 12'], check: ['M20 6L9 17l-5-5'], plus: ['M12 5v14M5 12h14'],
   'chevron-down': ['M6 9l6 6 6-6'], 'chevron-right': ['M9 18l6-6-6-6'],
@@ -54,6 +59,7 @@ export const TYPE_COLOR = { tree_water: '#234831', drain_clear: '#2a7b8a', cooli
 // amber needs a dark glyph to stay readable; the others use white
 export const TYPE_GLYPH = { tree_water: '#ffffff', drain_clear: '#ffffff', cooling_check: '#152e34', flood_report: '#ffffff', problem_report: '#ffffff' };
 
+// Build an SVG icon element by name, falling back to the pin icon if the name is unknown.
 export function icon(name, size) {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
@@ -66,6 +72,7 @@ export function icon(name, size) {
   return svg;
 }
 
+// Show a short toast message at the bottom of the screen, auto-removed after a delay.
 export function toast(message, opts = {}) {
   const node = el('div', { class: 'toast', role: 'status' },
     el('span', {}, opts.spinner ? el('span', { class: 'spin-inline' }) : null, message),
@@ -78,6 +85,7 @@ export function toast(message, opts = {}) {
 // ---------- bottom sheet (one at a time)
 let onSheetClose = null;
 
+// Open the bottom sheet with the given content. Content may end with sheetOpts(...) for options.
 export function openSheet(...content) {
   const opts = content[content.length - 1] && content[content.length - 1].__opts ? content.pop() : {};
   const wrap = document.getElementById('sheetWrap');
@@ -135,8 +143,10 @@ function enableSwipeClose(sheet) {
   });
 }
 
+// Wrap options for openSheet so they can be told apart from regular content.
 export const sheetOpts = (o) => Object.assign(Object.create(null), { __opts: true }, o);
 
+// Close the bottom sheet and run its onClose callback, if any.
 export function closeSheet() {
   const wrap = document.getElementById('sheetWrap');
   wrap.classList.remove('open');
@@ -145,9 +155,11 @@ export function closeSheet() {
   if (cb) cb();
 }
 
+// Whether the bottom sheet is currently open.
 export function sheetIsOpen() { return document.getElementById('sheetWrap').classList.contains('open'); }
 
 // ---------- formatting
+// Format a distance in meters as feet or miles, whichever reads better.
 export function fmtDist(m) {
   if (m == null || Number.isNaN(m)) return '—';
   const ft = m * 3.28084;
@@ -155,8 +167,10 @@ export function fmtDist(m) {
   return `${(ft / 5280).toFixed(1)} mi`;
 }
 
+// Convert Celsius to Fahrenheit, rounded to a whole number.
 export const cToF = (c) => Math.round(c * 9 / 5 + 32);
 
+// Turn an ISO timestamp into a short relative time like "5 min ago".
 export function timeAgo(iso) {
   if (!iso) return '';
   const d = new Date(iso.endsWith('Z') || /[+-]\d\d:\d\d$/.test(iso) ? iso : iso + 'Z');
@@ -167,6 +181,7 @@ export function timeAgo(iso) {
   return t('days_ago', { n: Math.round(s / 86400) });
 }
 
+// Format a date (or date string) as a short label like "Jan 5".
 export function dateShort(iso) {
   if (!iso) return '';
   return new Date(iso.length === 10 ? iso + 'T12:00:00' : iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });

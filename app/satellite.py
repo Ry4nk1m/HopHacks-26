@@ -1,3 +1,5 @@
+# Loads a saved satellite grid (vegetation and surface heat) and looks up values for a given point.
+
 import json
 import math
 from pathlib import Path
@@ -8,6 +10,7 @@ import numpy as np
 class SatelliteGrid:
     """Vegetation (NDVI) and surface-heat snapshot on a small WGS84 grid, with percentile ranks inside the area."""
 
+    # Store the grid data and pre-sort the values so percentiles can be looked up quickly later.
     def __init__(self, meta, ndvi, lst):
         self.meta = meta
         self.ndvi, self.lst = ndvi, lst
@@ -17,6 +20,7 @@ class SatelliteGrid:
         self._ndvi_sorted = np.sort(ndvi[np.isfinite(ndvi)])
         self._lst_sorted = np.sort(lst[np.isfinite(lst)])
 
+    # Load a satellite grid from a saved JSON file. Returns None if the file does not exist.
     @classmethod
     def load(cls, path):
         path = Path(path)
@@ -26,6 +30,7 @@ class SatelliteGrid:
         to_arr = lambda rows: np.array([[np.nan if v is None else v for v in r] for r in rows], dtype="float32")
         return cls(raw["meta"], to_arr(raw["ndvi"]), to_arr(raw["lst_c"]))
 
+    # Turn a lat/lon into the row and column of the grid cell it falls in, or None if outside the grid.
     def _cell(self, lat, lon):
         col = int((lon - self.west) / self.res)
         row = int((self.north - lat) / self.res)
@@ -33,15 +38,18 @@ class SatelliteGrid:
             return None
         return row, col
 
+    # Average the 3x3 block of cells around a point, skipping any missing values.
     def _mean3(self, arr, row, col):
         patch = arr[max(row - 1, 0): row + 2, max(col - 1, 0): col + 2]
         vals = patch[np.isfinite(patch)]
         return float(vals.mean()) if vals.size else None
 
+    # Find where a value ranks (0 to 1) within a sorted list of values.
     @staticmethod
     def _pct(sorted_vals, v):
         return float(np.searchsorted(sorted_vals, v) / len(sorted_vals)) if len(sorted_vals) else None
 
+    # Look up vegetation and heat for a location, plus how they rank against the rest of the area.
     def sample(self, lat, lon):
         cell = self._cell(lat, lon)
         if cell is None:
