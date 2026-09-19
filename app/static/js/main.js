@@ -249,12 +249,17 @@ function wireEvents() {
 }
 
 async function boot() {
+  let ok = false;
+  try { ok = await startup(); } finally { if (ok !== false) hideBoot(); }
+}
+
+async function startup() {
   S.voice = store.get('nm_voice') !== '0';
   try {
     S.cfg = await api('/api/config', { auth: false });
   } catch (e) {
     $('bootMsg').textContent = t('err_network');
-    return;
+    return false;
   }
   document.title = S.cfg.app_name;
   buildHud();
@@ -264,7 +269,6 @@ async function boot() {
   initMap(S.cfg);
   if (token.get()) { try { S.user = await api('/api/me'); } catch (e) { S.user = null; } }
   if (S.user) await enterApp(); else showOnboarding(enterApp);
-  hideBoot();
 }
 
 function paintAppChrome() {
@@ -274,7 +278,7 @@ function paintAppChrome() {
   if (theme) theme.setAttribute('content', '#152e34');
 }
 
-const SPLASH_MS = 3100;
+const SPLASH_MS = 2300;
 
 function hideBoot() {
   const b = $('boot');
@@ -290,7 +294,10 @@ function hideBoot() {
   };
   b.classList.add('out');
   b.addEventListener('transitionend', finish, { once: true });
-  setTimeout(finish, 700);
+  setTimeout(finish, 500);
 }
+
+// last resort: the splash must never outlive a slow or failed startup
+setTimeout(() => { const b = $('boot'); if (b && $('bootMsg').textContent === 'Loading map…') b.remove(); }, 8000);
 
 boot();
