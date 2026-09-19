@@ -29,6 +29,7 @@ def tercile_table(rows):
     return out
 
 
+# Pull every answered mission (yes/no) with its flag's satellite need score and flag type.
 def collect(conn):
     rows = []
     for r in conn.execute("SELECT m.was_problem, f.context, f.type FROM missions m JOIN flags f ON f.id=m.flag_id "
@@ -38,6 +39,7 @@ def collect(conn):
     return rows
 
 
+# Load real mission answers, split tree missions into need terciles, and print the precision table.
 def main():
     settings = load_settings()
     with db.connect(settings.data_dir / "app.db") as conn:

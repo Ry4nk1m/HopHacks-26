@@ -1,3 +1,6 @@
+// Holds the app's shared state and simple local storage helpers.
+
+// Global app state, shared across all modules by importing this object.
 export const S = {
   cfg: null,
   user: null,
@@ -12,6 +15,7 @@ export const S = {
   locState: 'unknown', // unknown | waiting | ok | denied | unavailable
 };
 
+// Wraps localStorage so reads and writes never throw if storage is blocked.
 export const store = {
   get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* storage unavailable */ } },
@@ -29,6 +33,7 @@ function reportCategory(f) {
 const isTreeReport = (f) => f.type === 'problem_report' && TREE_CATS.has(reportCategory(f));
 const isDrainReport = (f) => f.type === 'problem_report' && DRAIN_CATS.has(reportCategory(f));
 
+// One test function per filter chip, used to decide which flags to show.
 const FILTERS = {
   all: () => true,
   tree: (f) => f.type === 'tree_water' || isTreeReport(f),
@@ -37,6 +42,7 @@ const FILTERS = {
   reports: (f) => isReport(f) && !isTreeReport(f) && !isDrainReport(f),
 };
 
+// Return the flags that match the currently selected filter.
 export function visibleFlags() {
   return S.flags.filter(FILTERS[S.filter] || FILTERS.all);
 }

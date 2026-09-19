@@ -1,3 +1,5 @@
+# Main FastAPI app: builds the app, wires up background jobs, and defines all API routes.
+
 import json
 import threading
 import time
@@ -23,10 +25,12 @@ NO_CACHE = {"Cache-Control": "no-cache"}
 SYNC_STALE_SECONDS = 300
 
 
+# Request body for creating a new user.
 class UserIn(BaseModel):
     nickname: str = Field(min_length=1, max_length=60)
 
 
+# Request body for reporting arrival at a mission location.
 class ArriveIn(BaseModel):
     lat: float
     lon: float
@@ -34,27 +38,32 @@ class ArriveIn(BaseModel):
     manual: bool = False
 
 
+# Request body for confirming a flag's status.
 class ConfirmIn(BaseModel):
     lat: float
     lon: float
     accuracy: Optional[float] = None
 
 
+# Request body for dev tools to force a trigger condition on or off.
 class ForceIn(BaseModel):
     name: str
     mode: str
 
 
+# Request body for an admin approving or rejecting a pending mission.
 class ReviewIn(BaseModel):
     approve: bool
     note: Optional[str] = Field(default=None, max_length=200)
 
 
+# Request body for a text-to-speech request.
 class TTSIn(BaseModel):
     text: str = Field(min_length=1, max_length=1500)
     lang: str = "en"
 
 
+# Build and configure the FastAPI app, including routes and background jobs.
 def create_app(settings: Optional[Settings] = None, validator=None):
     settings = settings or load_settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
@@ -68,9 +77,11 @@ def create_app(settings: Optional[Settings] = None, validator=None):
              "sat_status": {"state": "idle", "at": None, "error": None}}
     render_cache = {}
 
+    # Open a new database connection.
     def conn():
         return db.connect(db_path)
 
+    # Re-check trigger conditions and update flags, but skip if it ran recently (unless forced).
     def sync(force=False):
         with sync_lock:
             if not force and time.monotonic() - state["last_sync"] < SYNC_STALE_SECONDS:
@@ -80,6 +91,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
             state["last_sync"] = time.monotonic()
             return result
 
+    # Pull in fresh external signals (weather, 311, etc) and then re-sync flags.
     def refresh_external():
         if not settings.external_fetch:
             return {}
@@ -114,6 +126,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
             refresh_satellite()
             time.sleep(max(settings.satellite_check_hours, 0.05) * 3600)
 
+    # Background thread loop: periodically refresh external data and clean up old photos.
     def background_loop():
         while True:
             time.sleep(settings.signals_refresh_minutes * 60)
@@ -124,6 +137,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
             except Exception:
                 pass
 
+    # Runs on app startup and shutdown: loads data, purges old photos, and starts background threads.
     @asynccontextmanager
     async def lifespan(app):
         with conn() as c:
@@ -147,6 +161,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
     app.state.limiter = limiter
     app.state.sync = sync
 
+    # Turn a MissionError into a JSON error response.
     @app.exception_handler(missions.MissionError)
     async def mission_error(request, exc):
         return JSONResponse({"code": exc.code, **exc.extra}, status_code=exc.status)
@@ -157,11 +172,13 @@ def create_app(settings: Optional[Settings] = None, validator=None):
         body = exc.detail if isinstance(exc.detail, dict) else {"detail": exc.detail}
         return JSONResponse(body, status_code=exc.status_code)
 
+    # Turn a UserError into a JSON error response.
     @app.exception_handler(users.UserError)
     async def user_error(request, exc):
         return JSONResponse({"code": exc.code}, status_code=exc.status)
 
     # ------------------------------------------------------------ auth
+    # Look up the logged-in user from the bearer token, or fail if not logged in.
     def current_user(authorization: Optional[str] = Header(None)):
         token = authorization[7:].strip() if authorization and authorization.lower().startswith("bearer ") else None
         with conn() as c:
@@ -170,28 +187,34 @@ def create_app(settings: Optional[Settings] = None, validator=None):
             raise HTTPException(401, detail={"code": "unauthorized"})
         return u
 
+    # Look up the user from the bearer token if there is one, but allow anonymous access.
     def optional_user(authorization: Optional[str] = Header(None)):
         token = authorization[7:].strip() if authorization and authorization.lower().startswith("bearer ") else None
         with conn() as c:
             return users.user_by_token(c, token)
 
+    # Block access unless dev tools are enabled in settings.
     def require_dev():
         if not settings.dev_tools:
             raise HTTPException(404, detail="not found")
 
+    # Block access unless the correct admin key was supplied.
     def require_admin(x_admin_key: Optional[str] = Header(None), key: Optional[str] = None):
         supplied = x_admin_key or key
         if not settings.admin_key or supplied != settings.admin_key:
             raise HTTPException(403, detail={"code": "forbidden"})
 
+    # Raise an error if this key has exceeded its allowed count within the time window.
     def limit(key, count, window):
         if not limiter.allow(key, count, window):
             raise HTTPException(429, detail={"code": "rate_limited"})
 
+    # Get the caller's IP address, checking the forwarded-for header first.
     def client_ip(request: Request):
         fwd = request.headers.get("x-forwarded-for")
         return (fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "?"))
 
+    # Read an uploaded file's bytes, rejecting it if it is over the max upload size.
     def read_upload(upload: UploadFile):
         data = upload.file.read(settings.max_upload_bytes + 1)
         if len(data) > settings.max_upload_bytes:
@@ -199,10 +222,12 @@ def create_app(settings: Optional[Settings] = None, validator=None):
         return data
 
     # ------------------------------------------------------------ public
+    # Simple health check endpoint.
     @app.get("/api/health")
     def health():
         return {"ok": True}
 
+    # Return app config: names, feature flags, area of interest, rules, and layer info.
     @app.get("/api/config")
     def get_config():
         satellite = state["sat"]
@@ -222,6 +247,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
                 "legends": layers.LEGENDS},
         }
 
+    # Serve a rendered map layer PNG (ndvi or lst), rendering it once and caching it.
     @app.get("/api/layers/{name}.png")
     def layer_png(name: str):
         satellite = state["sat"]
@@ -231,6 +257,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
             render_cache[name] = layers.render_png(satellite, name)
         return Response(render_cache[name], media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
 
+    # Create a new user account and return it with an auth token.
     @app.post("/api/users", status_code=201)
     def create_user(body: UserIn, request: Request):
         limit(("signup", client_ip(request)), 20, 3600)
@@ -238,6 +265,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
             u = users.create_user(c, body.nickname, "en")
             return users.public_user(c, u, include_token=True)
 
+    # Get the logged-in user's profile, streak, and active missions.
     @app.get("/api/me")
     def me(user=Depends(current_user)):
         now = datetime.now(timezone.utc)
@@ -247,6 +275,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
             out["active_missions"] = missions.active_missions(c, user["id"], now)
             return out
 
+    # List all flags on the map along with current weather/heat/rain conditions.
     @app.get("/api/flags")
     def list_flags(user=Depends(optional_user)):
         sync()
@@ -260,6 +289,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
             "heat": cond["heat"], "rain": cond["rain"], "dry": cond["dry"], "forced": cond["forced"], "auto": cond["auto"],
             "metrics": cond["metrics"], "events": [e["event"] for e in cond["events"]], "weather_at": weather_at, "status": status}}
 
+    # Get details for a single flag by id.
     @app.get("/api/flags/{flag_id}")
     def get_flag(flag_id: int, user=Depends(optional_user)):
         with conn() as c:
@@ -268,33 +298,39 @@ def create_app(settings: Optional[Settings] = None, validator=None):
                 raise HTTPException(404, detail={"code": "not_found"})
             return flagmod.flag_to_dict(c, row, user, datetime.now(timezone.utc), settings.timezone)
 
+    # Get the points leaderboard.
     @app.get("/api/leaderboard")
     def leaderboard():
         with conn() as c:
             return users.leaderboard(c)
 
+    # Get overall community impact stats.
     @app.get("/api/impact")
     def impact():
         with conn() as c:
             return users.impact(c)
 
     # ------------------------------------------------------------ missions
+    # Let the logged-in user accept a flag and start a mission for it.
     @app.post("/api/flags/{flag_id}/accept")
     def accept_mission(flag_id: int, user=Depends(current_user)):
         with conn() as c:
             m = missions.accept(c, user, flag_id, datetime.now(timezone.utc))
         return {"mission": m}
 
+    # Record the user's arrival location for a mission.
     @app.post("/api/missions/{mission_id}/arrive")
     def arrive(mission_id: int, body: ArriveIn, user=Depends(current_user)):
         with conn() as c:
             return missions.arrive(c, user, mission_id, body.lat, body.lon, body.accuracy, body.manual, datetime.now(timezone.utc))
 
+    # Cancel an in-progress mission for the logged-in user.
     @app.post("/api/missions/{mission_id}/cancel")
     def cancel(mission_id: int, user=Depends(current_user)):
         with conn() as c:
             return {"mission": missions.cancel(c, user, mission_id, datetime.now(timezone.utc))}
 
+    # Submit photo(s) to complete or confirm a mission, rate limited per user.
     @app.post("/api/missions/{mission_id}/submit")
     def submit(mission_id: int, photo: UploadFile = File(...), before: Optional[UploadFile] = File(None), lat: float = Form(...), lon: float = Form(...),
                accuracy: Optional[float] = Form(None), was_problem: Optional[str] = Form(None), lang: str = Form("en"), user=Depends(current_user)):
@@ -306,6 +342,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
             sync(force=True)
         return result
 
+    # Create a new user-reported issue (a report) with a photo, rate limited per user.
     @app.post("/api/reports")
     def create_report(photo: UploadFile = File(...), type: str = Form(...), note: Optional[str] = Form(None), lat: float = Form(...), lon: float = Form(...),
                       accuracy: Optional[float] = Form(None), lang: str = Form("en"), user=Depends(current_user)):
@@ -314,12 +351,14 @@ def create_app(settings: Optional[Settings] = None, validator=None):
         result = reports.create_report(settings, validator, user["id"], data, type, note, lat, lon, accuracy, lang)
         return result
 
+    # Confirm whether a flag's problem is still present, based on the user's location.
     @app.post("/api/flags/{flag_id}/confirm")
     def confirm(flag_id: int, body: ConfirmIn, user=Depends(current_user)):
         with conn() as c:
             return reports.confirm_flag(c, user, flag_id, body.lat, body.lon, body.accuracy, datetime.now(timezone.utc), settings)
 
     # ------------------------------------------------------------ voice
+    # Turn text into speech audio (mp3), falling back to browser TTS if unavailable.
     @app.post("/api/tts")
     def tts(body: TTSIn):
         try:
@@ -329,6 +368,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
         return Response(audio, media_type="audio/mpeg")
 
     # ------------------------------------------------------------ dev tools (demo and walk-testing)
+    # Show current trigger conditions and flag counts, for debugging (dev tools only).
     @app.get("/api/dev/state", dependencies=[Depends(require_dev)])
     def dev_state():
         with conn() as c:
@@ -339,6 +379,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
                     "satellite": {**state["sat_status"], "snapshot": state["sat"].meta["generated_at"] if state["sat"] else None,
                                   "refresh_days": settings.satellite_refresh_days}}
 
+    # Force a trigger condition on or off for testing (dev tools only).
     @app.post("/api/dev/force", dependencies=[Depends(require_dev)])
     def dev_force(body: ForceIn):
         try:
@@ -348,6 +389,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
             raise HTTPException(422, detail={"code": "bad_trigger"})
         return {"sync": sync(force=True)}
 
+    # Force a refresh of external signal data (dev tools only).
     @app.post("/api/dev/refresh", dependencies=[Depends(require_dev)])
     def dev_refresh():
         return {"status": refresh_external(), "sync": sync(force=True)}
@@ -359,6 +401,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
         threading.Thread(target=refresh_satellite, kwargs={"force": True}, daemon=True).start()
         return {"started": True}
 
+    # Wipe missions, reports, and user progress back to a clean demo state (dev tools only).
     @app.post("/api/dev/reset", dependencies=[Depends(require_dev)])
     def dev_reset():
         with conn() as c:
@@ -372,16 +415,19 @@ def create_app(settings: Optional[Settings] = None, validator=None):
         return {"sync": sync(force=True)}
 
     # ------------------------------------------------------------ admin review queue
+    # List missions waiting for admin review.
     @app.get("/api/admin/review", dependencies=[Depends(require_admin)])
     def admin_review():
         with conn() as c:
             return {"pending": missions.pending_reviews(c)}
 
+    # Approve or reject a pending mission (admin only).
     @app.post("/api/admin/review/{mission_id}", dependencies=[Depends(require_admin)])
     def admin_decide(mission_id: int, body: ReviewIn):
         with conn() as c:
             return missions.review_decide(c, settings, mission_id, body.approve, body.note, datetime.now(timezone.utc))
 
+    # Serve a mission's before/after photo file to an admin.
     @app.get("/api/admin/photo/{mission_id}", dependencies=[Depends(require_admin)])
     def admin_photo(mission_id: int, which: str = "after"):
         with conn() as c:
@@ -393,18 +439,22 @@ def create_app(settings: Optional[Settings] = None, validator=None):
         return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
     # ------------------------------------------------------------ static
+    # Serve the main app page.
     @app.get("/")
     def index():
         return FileResponse(STATIC / "index.html", headers=NO_CACHE)
 
+    # Serve the admin review page.
     @app.get("/admin")
     def admin_page():
         return FileResponse(STATIC / "admin.html", headers=NO_CACHE)
 
+    # Serve the web app manifest file.
     @app.get("/manifest.webmanifest")
     def manifest():
         return FileResponse(STATIC / "manifest.webmanifest", media_type="application/manifest+json", headers=NO_CACHE)
 
+    # Serve a static file, blocking access outside the static folder.
     @app.get("/static/{path:path}")
     def static_file(path: str):
         target = (STATIC / path).resolve()
@@ -416,4 +466,5 @@ def create_app(settings: Optional[Settings] = None, validator=None):
     return app
 
 
+# Module-level app instance used by the ASGI server (uvicorn) to run the app.
 app = create_app()

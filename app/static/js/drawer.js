@@ -1,3 +1,5 @@
+// The side drawer menu: profile, settings, and demo tools. Can be opened by swiping from the screen edge.
+
 import { S, store } from './state.js';
 import { el, icon, closeSheet } from './ui.js';
 import { t } from './i18n.js';
@@ -8,6 +10,7 @@ const EDGE_PX = 22;
 const OPEN_DIST = 60;
 let root, panel, scrim, edge, isOpen = false;
 
+// Move the drawer panel to a given horizontal position, with or without animation.
 function setPanelX(px, animate) {
   panel.style.transition = animate ? '' : 'none';
   panel.style.transform = `translateX(${px}px)`;
@@ -15,6 +18,7 @@ function setPanelX(px, animate) {
 
 const width = () => panel.getBoundingClientRect().width || 300;
 
+// Follow a pointer drag, moving the panel and scrim along with it, until the drag ends.
 function track(startX, from, onEnd) {
   const w = width();
   const move = (e) => { setPanelX(Math.max(-w, Math.min(0, from + (e.clientX - startX))), false); scrim.style.opacity = String(1 + Math.max(-w, Math.min(0, from + (e.clientX - startX))) / w); };
@@ -25,6 +29,7 @@ function track(startX, from, onEnd) {
   window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
 }
 
+// Open the drawer panel.
 export function openDrawer() {
   if (isOpen) return;
   render();
@@ -34,6 +39,7 @@ export function openDrawer() {
   setPanelX(0, true);
 }
 
+// Close the drawer panel.
 export function closeDrawer() {
   if (!isOpen) return;
   isOpen = false;
@@ -42,11 +48,13 @@ export function closeDrawer() {
   setPanelX(-width() - 20, true);
 }
 
+// Build one clickable row in the drawer, with an icon, title and optional subtitle.
 function row(ic, title, sub, onclick) {
   return el('button', { class: 'dr-row', onclick }, el('span', { class: 'dr-ic' }, icon(ic, 19)),
     el('span', { class: 'dr-txt' }, el('b', {}, title), sub ? el('small', {}, sub) : null));
 }
 
+// Draw the full contents of the drawer: profile header, settings, mission blurb, and demo tools.
 function render() {
   const u = S.user;
   const voiceSwitch = el('button', { class: 'dr-row', role: 'switch', 'aria-checked': String(S.voice), onclick: () => {
@@ -78,6 +86,7 @@ function render() {
   panel.replaceChildren(...kids);
 }
 
+// Set up the drawer: create its DOM, and wire up edge-swipe-to-open and drag-to-close gestures.
 export function initDrawer(host) {
   scrim = el('div', { class: 'dr-scrim', onclick: closeDrawer });
   panel = el('aside', { class: 'dr-panel', role: 'dialog', 'aria-label': t('menu_open') });

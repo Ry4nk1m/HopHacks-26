@@ -1,11 +1,14 @@
+// Reads mission text out loud, using ElevenLabs audio when available or the browser's built-in voice otherwise.
+
 import { S } from './state.js';
 import { api } from './api.js';
 
 let audio = null;
-let seq = 0;
+let seq = 0; // bumped on every stop/speak so old, in-flight requests know to give up
 let inflight = null;
 const cache = new Map();
 
+// Stop any voice playback in progress, whether it is ElevenLabs audio or browser speech.
 export function stopVoice() {
   seq += 1;
   if (inflight) { inflight.abort(); inflight = null; }

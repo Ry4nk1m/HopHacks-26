@@ -1,3 +1,4 @@
+# End-to-end API tests covering the full mission and reporting flows.
 import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -11,8 +12,10 @@ from app.config import Settings
 from app.main import create_app
 from tests.helpers import Scripted, blurry_photo, photo_bytes
 
+# Weather metrics representing normal, non-triggering conditions.
 MILD = {"past7_mm": 20, "next2_mm": 0, "next3_mm": 2, "max_prob_next2": 0, "max_apparent_next3_c": 27, "max_temp_c": 25}
 NOW_ISO = datetime.now(timezone.utc).isoformat(timespec="seconds")
+# Sample 311 service request rows used to seed the fake city311 signal.
 ROWS = [
     {"ref": "26-DRAIN", "srtype": "WW-Storm Inlet Choke", "flag_type": "drain_clear", "category": "storm_inlet_choke", "status": "Open",
      "created": NOW_ISO, "address": "3100 CHARLES ST", "neighborhood": "Charles Village", "lat": 39.3300, "lon": -76.6150},
@@ -23,6 +26,7 @@ ROWS = [
 ]
 
 
+# Spin up a test app with seeded weather/311 signals and a scripted validator.
 @pytest.fixture
 def env(tmp_path):
     settings = Settings(data_dir=tmp_path, external_fetch=False, background_jobs=False, dev_tools=True, admin_key="adm-key")
@@ -35,29 +39,35 @@ def env(tmp_path):
         yield SimpleNamespace(client=client, v=validator, settings=settings, path=path)
 
 
+# Create a new user account and return the parsed response.
 def signup(env, name="Maya", lang="en"):
     r = env.client.post("/api/users", json={"nickname": name, "lang": lang})
     assert r.status_code == 201, r.text
     return r.json()
 
 
+# Build an Authorization header for a given user.
 def H(u):
     return {"Authorization": f"Bearer {u['token']}"}
 
 
+# Look up a specific open flag by type (and optional source) from the flags list.
 def flag(env, ftype, source=None, user=None):
     fl = env.client.get("/api/flags", headers=H(user) if user else {}).json()["flags"]
     return next(f for f in fl if f["type"] == ftype and (source is None or f["source"] == source))
 
 
+# Claim a flag as a mission for the given user.
 def accept(env, u, f):
     return env.client.post(f"/api/flags/{f['id']}/accept", headers=H(u))
 
 
+# Report the user's location as an arrival attempt for a mission.
 def arrive(env, u, mid, lat, lon, acc=10, manual=False):
     return env.client.post(f"/api/missions/{mid}/arrive", headers=H(u), json={"lat": lat, "lon": lon, "accuracy": acc, "manual": manual})
 
 
+# Submit a mission's photo (and optional before photo) for validation.
 def submit(env, u, mid, lat, lon, seed=1, acc=10, before=None, was_problem=None, lang="en", photo=None):
     files = {"photo": ("p.jpg", photo or photo_bytes(seed), "image/jpeg")}
     if before is not None:
@@ -68,6 +78,7 @@ def submit(env, u, mid, lat, lon, seed=1, acc=10, before=None, was_problem=None,
     return env.client.post(f"/api/missions/{mid}/submit", headers=H(u), files=files, data=data)
 
 
+# Accept a flag and optionally mark arrival right away, returning the mission id.
 def start(env, u, f, arrive_now=True):
     mid = accept(env, u, f).json()["mission"]["id"]
     if arrive_now:
@@ -75,11 +86,13 @@ def start(env, u, f, arrive_now=True):
     return mid
 
 
+# Fetch the current user's profile.
 def me(env, u):
     return env.client.get("/api/me", headers=H(u)).json()
 
 
 # ------------------------------------------------------------------ accounts, config, layers
+# Check signup, auth requirements, nickname validation, and profile fields.
 def test_signup_auth_and_profile(env):
     assert env.client.get("/api/me").status_code == 401 and env.client.get("/api/me").json() == {"code": "unauthorized"}
     assert env.client.get("/api/me", headers={"Authorization": "Bearer nope"}).status_code == 401
@@ -91,12 +104,14 @@ def test_signup_auth_and_profile(env):
     assert env.client.patch("/api/me", headers=H(u), json={"lang": "es"}).status_code == 405  # no language switching any more
 
 
+# Check that repeated signups get rate limited.
 def test_signup_is_rate_limited(env):
     for i in range(20):
         assert env.client.post("/api/users", json={"nickname": f"User {i:02d}"}).status_code == 201
     assert env.client.post("/api/users", json={"nickname": "One too many"}).status_code == 429
 
 
+# Check the config, layer image, and health endpoints return sane data.
 def test_config_layers_and_health(env):
     cfg = env.client.get("/api/config").json()
     assert cfg["validator"] == "scripted" and cfg["dev_tools"] is True and len(cfg["aoi"]) == 4
@@ -109,6 +124,7 @@ def test_config_layers_and_health(env):
     assert env.client.get("/api/health").json() == {"ok": True}
 
 
+# Check that the flags list includes real sources and correct per-user fields.
 def test_flags_listing_has_real_sources_and_user_specific_fields(env):
     listing = env.client.get("/api/flags").json()
     types = {(f["type"], f["source"]) for f in listing["flags"]}
@@ -120,6 +136,7 @@ def test_flags_listing_has_real_sources_and_user_specific_fields(env):
 
 
 # ------------------------------------------------------------------ the core mission loop
+# Check the full cooling-check mission flow from accept to verified completion.
 def test_complete_a_cooling_check_end_to_end(env):
     u = signup(env)
     f = flag(env, "cooling_check", user=u)
@@ -143,6 +160,7 @@ def test_complete_a_cooling_check_end_to_end(env):
         assert feat["last_verified_at"] and json.loads(feat["info"])["hours_text"] == "Mon-Fri 9am-5pm"
 
 
+# Check the before-photo bonus points and that language is passed through correctly.
 def test_before_photo_bonus_and_language_passthrough(env):
     u = signup(env)
     f = flag(env, "drain_clear", user=u)
@@ -155,6 +173,7 @@ def test_before_photo_bonus_and_language_passthrough(env):
 @pytest.mark.parametrize("change,code", [
     ({"contains_people": True}, "privacy"), ({"contains_pii": True}, "privacy"), ({"photo_ok": False}, "bad_photo"),
     ({"subject_ok": False}, "wrong_subject"), ({"task_done": False}, "task_not_done"), ({"confidence": 0.2}, "low_confidence")])
+# Check that various validator rejections keep the mission open for a retry.
 def test_rejections_keep_the_mission_open_for_a_retry(env, change, code):
     u = signup(env)
     f = flag(env, "cooling_check", user=u)
@@ -167,6 +186,7 @@ def test_rejections_keep_the_mission_open_for_a_retry(env, change, code):
     assert submit(env, u, mid, f["lat"], f["lon"], seed=2).json()["outcome"] == "verified"
 
 
+# Check that three failed attempts end the mission and free up the flag.
 def test_three_rejections_end_the_mission_and_release_the_flag(env):
     u = signup(env)
     f = flag(env, "cooling_check", user=u)
@@ -180,6 +200,7 @@ def test_three_rejections_end_the_mission_and_release_the_flag(env):
     assert accept(env, other, f).status_code == 200  # the flag was released
 
 
+# Check that bad photo uploads are rejected without calling the validator or losing an attempt.
 def test_photo_problems_are_caught_before_the_model_is_called(env):
     u = signup(env)
     f = flag(env, "cooling_check", user=u)
@@ -191,6 +212,7 @@ def test_photo_problems_are_caught_before_the_model_is_called(env):
     assert me(env, u)["active_missions"][0]["remaining_attempts"] == 3  # bad uploads don't burn attempts
 
 
+# Check that a validator outage does not cost the user an attempt.
 def test_model_outage_does_not_cost_an_attempt(env):
     u = signup(env)
     f = flag(env, "cooling_check", user=u)
@@ -201,6 +223,7 @@ def test_model_outage_does_not_cost_an_attempt(env):
     assert me(env, u)["active_missions"][0]["remaining_attempts"] == 3
 
 
+# Check that reusing the same photo on a different flag is rejected as a duplicate.
 def test_reused_photo_is_rejected_everywhere(env):
     u = signup(env)
     f1, f2 = flag(env, "cooling_check", user=u), flag(env, "drain_clear", user=u)
@@ -211,6 +234,7 @@ def test_reused_photo_is_rejected_everywhere(env):
     assert r["outcome"] == "rejected" and r["code"] == "duplicate_photo" and r["mission"]["remaining_attempts"] == 2
 
 
+# Check guard conditions like no arrival, expired arrival, wrong user, and being too far away.
 def test_submission_guards(env):
     u, other = signup(env), signup(env, "Other")
     f = flag(env, "cooling_check", user=u)
@@ -230,6 +254,7 @@ def test_submission_guards(env):
     assert submit(env, u, mid, f["lat"], f["lon"], seed=2).json() == {"code": "not_active"}
 
 
+# Check that manual arrival requires a higher validator confidence than automatic arrival.
 def test_manual_arrival_needs_higher_confidence(env):
     u = signup(env)
     f = flag(env, "cooling_check", user=u)
@@ -240,6 +265,7 @@ def test_manual_arrival_needs_higher_confidence(env):
 
 
 # ------------------------------------------------------------------ review queue
+# Check that low-confidence submissions go to the admin review queue and can be approved.
 def test_pending_review_queue(env):
     u = signup(env)
     f = flag(env, "cooling_check", user=u)
@@ -262,6 +288,7 @@ def test_pending_review_queue(env):
     assert me(env, u)["points"] > 0 and env.client.post(f"/api/admin/review/{mid}", headers=admin, json={"approve": True}).status_code == 409
 
 
+# Check that an admin rejecting a pending mission reopens the flag.
 def test_admin_rejection_reopens_the_flag(env):
     u = signup(env)
     f = flag(env, "cooling_check", user=u)
@@ -274,6 +301,7 @@ def test_admin_rejection_reopens_the_flag(env):
     assert accept(env, signup(env, "Other"), f).status_code == 200
 
 
+# Check that admin endpoints are locked down when no admin key is configured.
 def test_admin_disabled_without_a_configured_key(tmp_path):
     settings = Settings(data_dir=tmp_path, external_fetch=False, background_jobs=False, admin_key="")
     with TestClient(create_app(settings, Scripted())) as client:
@@ -281,6 +309,7 @@ def test_admin_disabled_without_a_configured_key(tmp_path):
 
 
 # ------------------------------------------------------------------ claims and limits
+# Check flag claiming, expiry, and cancellation behavior.
 def test_claims_lockouts_and_caps(env):
     u, other = signup(env), signup(env, "Other")
     f = flag(env, "cooling_check", user=u)
@@ -297,6 +326,7 @@ def test_claims_lockouts_and_caps(env):
     assert cancelled["status"] == "cancelled" and env.client.post(f"/api/missions/{m['id']}/cancel", headers=H(u)).status_code == 409
 
 
+# Check the cap on active missions and the lockout on repeating a recently done flag.
 def test_max_active_missions_and_repeat_lockout(env):
     u = signup(env)
     cool = [x for x in env.client.get("/api/flags").json()["flags"] if x["type"] == "cooling_check"][:4]
@@ -313,6 +343,7 @@ def test_max_active_missions_and_repeat_lockout(env):
     assert accept(env, u, f).json() == {"code": "recently_done"}
 
 
+# Check that repeated submissions on one mission get rate limited.
 def test_submissions_are_rate_limited(env):
     u = signup(env)
     f = flag(env, "cooling_check", user=u)
@@ -323,6 +354,7 @@ def test_submissions_are_rate_limited(env):
     assert submit(env, u, mid, f["lat"], f["lon"], seed=99).json() == {"code": "rate_limited"}
 
 
+# Check that points stop being awarded once the daily point cap is hit.
 def test_daily_point_cap_awards_nothing_past_the_limit(env):
     u = signup(env)
     with db.connect(env.path) as c:
@@ -334,6 +366,7 @@ def test_daily_point_cap_awards_nothing_past_the_limit(env):
 
 
 # ------------------------------------------------------------------ confirming reported problems
+# Check the confirm flow for a 311-reported problem, including resolution once it's fixed.
 def test_confirm_mission_on_a_311_problem(env):
     u, w = signup(env), signup(env, "Walker")
     f = flag(env, "problem_report", "311", user=u)
@@ -349,6 +382,7 @@ def test_confirm_mission_on_a_311_problem(env):
         assert c.execute("SELECT was_problem FROM missions WHERE id=?", (mid,)).fetchone()[0] == "yes"
 
 
+# Check that an unclear confirmation verdict is rejected.
 def test_unclear_confirmation_is_rejected(env):
     u = signup(env)
     f = flag(env, "flood_report", "311", user=u)
@@ -361,11 +395,13 @@ def test_unclear_confirmation_is_rejected(env):
 HOME = (39.3305, -76.6205)
 
 
+# Submit a user-created problem report with a photo.
 def report(env, u, seed=1, rtype="problem_report", lat=HOME[0], lon=HOME[1], acc=10, note="", photo=None):
     return env.client.post("/api/reports", headers=H(u), files={"photo": ("p.jpg", photo or photo_bytes(seed), "image/jpeg")},
                            data={"type": rtype, "lat": lat, "lon": lon, "accuracy": acc, "note": note, "lang": "en"})
 
 
+# Check that a high-confidence user report creates a confirmed flag and earns points.
 def test_confident_report_becomes_a_confirmed_flag_and_earns_points(env):
     u = signup(env)
     env.v.set(category="flooded_road", severity=3, confidence=0.9)
@@ -376,6 +412,7 @@ def test_confident_report_becomes_a_confirmed_flag_and_earns_points(env):
     assert f["expires_at"] and me(env, u)["points"] == 10 and "eyes_on_street" not in me(env, u)["badges"]
 
 
+# Check that a low-confidence report needs a second person's confirmation before points are paid.
 def test_unsure_report_needs_a_second_person_to_confirm(env):
     u, w = signup(env), signup(env, "Walker")
     env.v.set(category="litter", confidence=0.6)
@@ -393,6 +430,7 @@ def test_unsure_report_needs_a_second_person_to_confirm(env):
     assert env.client.get(f"/api/flags/{fid}", headers=H(w)).json()["unconfirmed"] is False
 
 
+# Check report rejection reasons and guard conditions like area, GPS accuracy, and photo quality.
 def test_report_rejections_and_guards(env):
     u = signup(env)
     cases = [({"contains_people": True}, "privacy"), ({"photo_ok": False}, "bad_photo"), ({"subject_ok": False}, "wrong_subject"),
@@ -414,6 +452,7 @@ def test_report_rejections_and_guards(env):
     assert env.client.post("/api/reports", files={"photo": ("p.jpg", photo_bytes(1), "image/jpeg")}, data={"type": "problem_report", "lat": 1, "lon": 1}).status_code == 401
 
 
+# Check duplicate report detection by location and by reused photo.
 def test_duplicate_report_and_reused_photo(env):
     u, w = signup(env), signup(env, "Walker")
     assert report(env, u, seed=1).json()["outcome"] == "created"
@@ -423,6 +462,7 @@ def test_duplicate_report_and_reused_photo(env):
     assert report(env, w, seed=3, lat=HOME[0] + 0.005).json()["outcome"] == "created"
 
 
+# Check report rate limits and the badge earned after three reports.
 def test_report_limits_and_three_reports_earn_a_badge(env):
     u = signup(env)
     env.v.set(category="litter", confidence=0.9)
@@ -435,6 +475,7 @@ def test_report_limits_and_three_reports_earn_a_badge(env):
 
 
 # ------------------------------------------------------------------ dev tools and misc endpoints
+# Check the dev tools for forcing conditions, checking state, and resetting.
 def test_dev_tools_force_conditions_and_reset(env):
     u = signup(env)
     assert env.client.post("/api/dev/force", json={"name": "dry", "mode": "on"}).json()["sync"]["conditions"]["dry"] is True
@@ -452,6 +493,7 @@ def test_dev_tools_force_conditions_and_reset(env):
     assert env.client.post("/api/dev/refresh").status_code == 200
 
 
+# Check that dev tool endpoints are hidden when dev tools are disabled.
 def test_dev_tools_are_hidden_when_disabled(tmp_path):
     settings = Settings(data_dir=tmp_path, external_fetch=False, background_jobs=False, dev_tools=False)
     with TestClient(create_app(settings, Scripted())) as client:
@@ -461,6 +503,7 @@ def test_dev_tools_are_hidden_when_disabled(tmp_path):
         assert client.get("/api/config").json()["dev_tools"] is False
 
 
+# Check the leaderboard ordering and impact stats after verified missions.
 def test_leaderboard_and_impact(env):
     a, b = signup(env, "Ana"), signup(env, "Ben")
     for u, ftype, seed in ((a, "cooling_check", 1), (b, "drain_clear", 2)):
@@ -472,6 +515,7 @@ def test_leaderboard_and_impact(env):
     assert imp["verified_total"] == 2 and imp["by_type"] == {"cooling_check": 1, "drain_clear": 1} and imp["volunteers"] == 2 and imp["open_flags"] > 0
 
 
+# Check static file serving blocks path traversal attempts.
 def test_static_files_and_path_safety(env):
     assert env.client.get("/static/../main.py").status_code == 404
     assert env.client.get("/static/%2e%2e/config.py").status_code == 404
@@ -483,6 +527,7 @@ def test_static_files_and_path_safety(env):
     assert env.client.get("/api/openapi.json").status_code == 200
 
 
+# Check that text-to-speech falls back gracefully when no key is configured.
 def test_tts_falls_back_without_a_key(env):
     r = env.client.post("/api/tts", json={"text": "hello", "lang": "en"})
     assert r.status_code == 503 and r.json()["fallback"] == "browser"

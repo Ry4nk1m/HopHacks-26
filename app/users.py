@@ -1,3 +1,5 @@
+# User accounts, nicknames, streaks, points, badges, and leaderboards.
+
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -11,12 +13,14 @@ except ImportError:  # pragma: no cover
 NICK_RE = re.compile(r"^[\w .\-']+$", re.UNICODE)
 
 
+# Raised for user-facing problems, with an error code and an HTTP status.
 class UserError(Exception):
     def __init__(self, code, status=400):
         super().__init__(code)
         self.code, self.status = code, status
 
 
+# Get today's date in the user's own timezone (falls back to UTC).
 def local_day(now, tzname):
     try:
         tz = ZoneInfo(tzname) if ZoneInfo else timezone.utc
@@ -25,6 +29,7 @@ def local_day(now, tzname):
     return now.astimezone(tz).date()
 
 
+# Get the start of today (midnight) in the user's timezone, converted to a UTC timestamp string.
 def local_day_start_utc(now, tzname):
     from datetime import time
     try:
@@ -35,6 +40,7 @@ def local_day_start_utc(now, tzname):
     return start.astimezone(timezone.utc).replace(microsecond=0).isoformat()
 
 
+# Normalize a nickname (collapse whitespace) and check it against length, character, and letter rules.
 def clean_nickname(raw):
     nick = re.sub(r"\s+", " ", (raw or "").strip())
     if not (rules.NICKNAME_MIN <= len(nick) <= rules.NICKNAME_MAX) or not NICK_RE.match(nick) or not re.search(r"[^\W\d_]", nick):
@@ -42,6 +48,7 @@ def clean_nickname(raw):
     return nick
 
 
+# Create a new user row with a clean nickname, a valid language, and a fresh login token.
 def create_user(conn, nickname, lang, now=None):
     nick = clean_nickname(nickname)
     lang = lang if lang in rules.LANGS else "en"
@@ -54,6 +61,7 @@ def create_user(conn, nickname, lang, now=None):
     return user
 
 
+# Look up a user by their login token. Returns None if there is no token or no match.
 def user_by_token(conn, token):
     if not token:
         return None
@@ -61,10 +69,12 @@ def user_by_token(conn, token):
     return dict(r) if r else None
 
 
+# List the badge codes a user has earned, oldest first.
 def badges_of(conn, user_id):
     return [r["code"] for r in conn.execute("SELECT code FROM badges WHERE user_id=? ORDER BY earned_at", (user_id,))]
 
 
+# Build the version of a user record that is safe to send to clients (optionally with their token).
 def public_user(conn, user, include_token=False):
     out = {k: user[k] for k in ("id", "nickname", "points", "streak", "best_streak", "lang")}
     out["badges"] = badges_of(conn, user["id"])
@@ -74,6 +84,7 @@ def public_user(conn, user, include_token=False):
     return out
 
 
+# Update a user's streak for today: continue it if active yesterday, reset to 1 otherwise, and track the best streak.
 def touch_streak(conn, user_id, now, tzname):
     u = conn.execute("SELECT streak, best_streak, last_active_day FROM users WHERE id=?", (user_id,)).fetchone()
     today = local_day(now, tzname)
@@ -95,6 +106,7 @@ def current_streak(conn, user_id, now, tzname):
     return 0
 
 
+# Give a user points, logging the event. Does nothing if delta is zero or negative.
 def award(conn, user_id, delta, reason, ref, now):
     if delta <= 0:
         return
@@ -103,6 +115,7 @@ def award(conn, user_id, delta, reason, ref, now):
     conn.execute("UPDATE users SET points = points + ? WHERE id=?", (delta, user_id))
 
 
+# Sum a user's points earned in the last 7 days.
 def weekly_points(conn, user_id, now=None):
     now = now or datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=7)).replace(microsecond=0).isoformat()
@@ -137,6 +150,7 @@ def check_badges(conn, user_id, now):
     return new
 
 
+# Build the leaderboard: top users by points in the last 7 days, and top users by all-time points.
 def leaderboard(conn, limit=10, now=None):
     now = now or datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=7)).replace(microsecond=0).isoformat()
@@ -147,6 +161,7 @@ def leaderboard(conn, limit=10, now=None):
     return {"weekly": weekly, "all_time": total}
 
 
+# Build overall impact stats: verified missions by type, this week's count, volunteer count, and open flags.
 def impact(conn, now=None):
     now = now or datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=7)).replace(microsecond=0).isoformat()

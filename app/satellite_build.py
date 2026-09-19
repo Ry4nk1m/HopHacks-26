@@ -30,6 +30,7 @@ S2_LOOKBACK_DAYS = 80
 LANDSAT_LOOKBACK_DAYS = 75
 
 
+# Query the Planetary Computer STAC API for recent, low-cloud scenes covering the area.
 def search(collection, aoi, days, max_cloud, limit=30):
     end = datetime.now(timezone.utc)
     body = {"collections": [collection], "bbox": list(aoi),
@@ -41,6 +42,7 @@ def search(collection, aoi, days, max_cloud, limit=30):
     return r.json()["features"]
 
 
+# Get a short-lived token that signs asset URLs so they can be read from blob storage.
 def signer(collection):
     r = httpx.get(SAS.format(collection), timeout=60)
     r.raise_for_status()
@@ -48,6 +50,7 @@ def signer(collection):
     return lambda href: f"{href}?{token}"
 
 
+# Read one band from a remote raster, cropped to the area of interest, in the raster's own projection.
 def read_window(href, aoi, out_shape=None, resampling=Resampling.bilinear):
     with rasterio.open(href) as ds:
         left, bottom, right, top = transform_bounds("EPSG:4326", ds.crs, *aoi)
@@ -56,6 +59,7 @@ def read_window(href, aoi, out_shape=None, resampling=Resampling.bilinear):
         return arr, ds.window_transform(win), ds.crs
 
 
+# Reproject and resample an array onto a fixed-resolution lat/lon grid covering the area.
 def to_grid(arr, transform, crs, aoi):
     w, s, e, n = aoi
     cols, rows = math.ceil((e - w) / RES_DEG), math.ceil((n - s) / RES_DEG)
@@ -66,6 +70,7 @@ def to_grid(arr, transform, crs, aoi):
     return dst
 
 
+# Compute the vegetation index (NDVI) for one Sentinel-2 scene, masking clouds and no-data pixels.
 def ndvi_scene(item, sign, aoi):
     red, tr, crs = read_window(sign(item["assets"]["B04"]["href"]), aoi)
     nir, _, _ = read_window(sign(item["assets"]["B08"]["href"]), aoi, out_shape=red.shape)
@@ -78,6 +83,7 @@ def ndvi_scene(item, sign, aoi):
     return to_grid(ndvi, tr, crs, aoi)
 
 
+# Convert the Landsat thermal band to surface temperature in Celsius, masking cloud-affected pixels.
 def lst_scene(item, sign, aoi):
     st, tr, crs = read_window(sign(item["assets"]["lwir11"]["href"]), aoi)
     qa, _, _ = read_window(sign(item["assets"]["qa_pixel"]["href"]), aoi, out_shape=st.shape, resampling=Resampling.nearest)
@@ -88,6 +94,7 @@ def lst_scene(item, sign, aoi):
     return to_grid(celsius, tr, crs, aoi)
 
 
+# Build a median composite from multiple scenes, skipping ones that fail to load or are mostly cloud.
 def composite(items, fn, sign, aoi, want):
     grids, used = [], []
     for it in items:
@@ -111,10 +118,12 @@ def composite(items, fn, sign, aoi, want):
         return np.nanmedian(np.stack(grids), axis=0), used
 
 
+# Convert a numpy grid into plain nested lists for JSON, rounding values and turning NaN into None.
 def encode(grid, digits):
     return [[None if not np.isfinite(v) else round(float(v), digits) for v in row] for row in grid]
 
 
+# Fetch Sentinel-2 and Landsat scenes, build vegetation and heat composites, and write them to a satellite snapshot (satellite.json by default).
 def build(out=None):
     out = Path(out) if out else ROOT / "app" / "data" / "satellite.json"
     aoi = load_settings().aoi

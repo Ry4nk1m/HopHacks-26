@@ -1,8 +1,11 @@
+// Handles GPS location: watching position, computing distances, and the demo "fake location" mode.
+
 import { S } from './state.js';
 import { emit } from './bus.js';
 
-const R = 6371008.8;
+const R = 6371008.8; // earth radius in meters
 
+// Distance in meters between two lat/lon points, using the haversine formula.
 export function haversine(lat1, lon1, lat2, lon2) {
   const p1 = (lat1 * Math.PI) / 180, p2 = (lat2 * Math.PI) / 180;
   const dp = p2 - p1, dl = ((lon2 - lon1) * Math.PI) / 180;
@@ -10,6 +13,7 @@ export function haversine(lat1, lon1, lat2, lon2) {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
 }
 
+// Build a GeoJSON polygon approximating a circle of the given radius around a point.
 export function circlePolygon(lat, lon, radiusM, steps = 48) {
   const ring = [];
   const dLat = radiusM / 111320, dLon = radiusM / (111320 * Math.cos((lat * Math.PI) / 180));
@@ -26,11 +30,13 @@ export function getPos() {
   return S.pos;
 }
 
+// Turn on the demo fake location and tell listeners the position changed.
 export function setFake(lat, lon) {
   S.fake = { lat, lon };
   emit('pos');
 }
 
+// Turn off the demo fake location, going back to real GPS.
 export function clearFake() {
   S.fake = null;
   emit('pos');
@@ -38,6 +44,7 @@ export function clearFake() {
 
 let watchId = null;
 
+// Handle a new GPS reading: smooth out small jitter, then save it and notify listeners.
 function onFix(p) {
   const { latitude: lat, longitude: lon, accuracy: acc } = p.coords;
   let fix = { lat, lon, acc, ts: p.timestamp || Date.now() };
@@ -50,12 +57,14 @@ function onFix(p) {
   emit('pos');
 }
 
+// Handle a GPS error: record whether permission was denied or location is unavailable.
 function onError(err) {
   if (err && err.code === 1) S.locState = 'denied';
   else if (!S.pos) S.locState = 'unavailable';
   emit('pos');
 }
 
+// Start watching the device's GPS position, if not already watching.
 export function startLocation() {
   if (!navigator.geolocation) { S.locState = 'unavailable'; emit('pos'); return; }
   if (watchId != null) return;

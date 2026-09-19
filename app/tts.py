@@ -1,3 +1,6 @@
+# Text to speech helper using the ElevenLabs API.
+# Turns text into MP3 audio and caches the result on disk so we don't call the API twice for the same text.
+
 import hashlib
 
 import httpx
@@ -7,10 +10,12 @@ MODEL_ID = "eleven_multilingual_v2"
 MAX_CHARS = 1500
 
 
+# Raised when we cannot get audio back from ElevenLabs.
 class TTSUnavailable(Exception):
     pass
 
 
+# Pull a short error message out of an ElevenLabs error response, if there is one.
 def _reason(resp):
     try:
         detail = resp.json().get("detail")
@@ -28,6 +33,7 @@ def synthesize(settings, text, lang="en", client=None):
     if not text:
         raise TTSUnavailable("empty text")
 
+    # Check the on-disk cache first, keyed by voice, model, and text.
     cache_dir = settings.data_dir / "tts"
     cache_dir.mkdir(parents=True, exist_ok=True)
     key = hashlib.sha256(f"{settings.eleven_voice_id}|{MODEL_ID}|{text}".encode()).hexdigest()
@@ -35,6 +41,7 @@ def synthesize(settings, text, lang="en", client=None):
     if path.exists():
         return path.read_bytes()
 
+    # Use the passed-in client if given, otherwise make our own and close it when done.
     own = client is None
     client = client or httpx.Client(timeout=60)
     try:
@@ -50,5 +57,6 @@ def synthesize(settings, text, lang="en", client=None):
             client.close()
     if resp.status_code != 200:
         raise TTSUnavailable(f"ElevenLabs returned HTTP {resp.status_code}{_reason(resp)}")
+    # Save the audio to the cache before returning it.
     path.write_bytes(resp.content)
     return resp.content

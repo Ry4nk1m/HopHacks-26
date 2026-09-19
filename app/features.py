@@ -1,3 +1,5 @@
+# Loads and reads map features (trees, drains, public spaces, cooling centres) from the database.
+
 import json
 
 from . import db
@@ -11,6 +13,7 @@ def load_snapshot(conn, settings):
         return 0
     snap = json.loads(path.read_text())
     n = 0
+    # Insert each feature, or update it if a feature with that id already exists.
     for f in snap["features"]:
         conn.execute(
             "INSERT INTO features (id, kind, source, name, lat, lon, tags) VALUES (?,?,?,?,?,?,?) "
@@ -21,6 +24,7 @@ def load_snapshot(conn, settings):
     return n
 
 
+# Get features of the given kinds that fall inside the area of interest bounding box.
 def features_in_aoi(conn, settings, kinds):
     marks = ",".join("?" for _ in kinds)
     out = []
@@ -33,5 +37,6 @@ def features_in_aoi(conn, settings, kinds):
     return out
 
 
+# Save the last time a feature was checked, plus any extra info about it.
 def mark_verified(conn, feature_id, info, when):
     conn.execute("UPDATE features SET last_verified_at=?, info=? WHERE id=?", (when, json.dumps(info), feature_id))

@@ -1,3 +1,5 @@
+// App entry point: boots the app, builds the HUD, wires up events, and drives the app lifecycle.
+
 import { S, store, visibleFlags } from './state.js';
 import { on, emit } from './bus.js';
 import { api, token, ApiError } from './api.js';
@@ -19,6 +21,7 @@ let pollTimer = null;
 let overlayMenuOpen = false;
 
 // ------------------------------------------------------------------ HUD
+// Build the heads-up display: profile pill, layer toggle, locate button, voice toggle, filter chips, and the report button.
 function buildHud() {
   hud = {
     profile: el('button', { class: 'pill', onclick: openDrawer, 'aria-label': t('menu_open') }, icon('user', 18), el('span', { id: 'profileTxt' })),
@@ -42,6 +45,7 @@ function buildHud() {
 
 const FILTER_TYPE = { tree: 'tree_water', drain: 'drain_clear', cooling: 'cooling_check', reports: 'problem_report' };
 
+// Draw the filter chip row (all / tree / drain / cooling / reports).
 function renderChips() {
   const buttons = FILTER_IDS.map((id) => {
     const on = S.filter === id;
@@ -57,6 +61,7 @@ function renderChips() {
   setKids(hud.chips, el('div', { class: 'segbar', role: 'group', 'aria-label': t('f_all') }, buttons));
 }
 
+// Update the voice toggle button's icon and label to match the current voice setting.
 function renderVoiceButton() {
   setKids(hud.voice, icon(S.voice ? 'volume' : 'volume-x', 21));
   hud.voice.setAttribute('aria-label', S.voice ? t('voice_on') : t('voice_off'));
@@ -64,6 +69,7 @@ function renderVoiceButton() {
   hud.voice.classList.toggle('muted', !S.voice);
 }
 
+// Turn voice guidance on or off and save the choice.
 function toggleVoice() {
   S.voice = !S.voice;
   store.set('nm_voice', S.voice ? '1' : '0');
@@ -72,6 +78,7 @@ function toggleVoice() {
   toast(S.voice ? t('voice_on') : t('voice_off'), { ms: 1600 });
 }
 
+// Draw the condition pills (heat, rain, dry spell, demo teleport) above the map.
 function renderConds() {
   const c = S.conditions;
   const pills = [];
@@ -85,12 +92,14 @@ function renderConds() {
   hud.conds.replaceChildren(...pills);
 }
 
+// Update the profile button's text with the user's nickname, points, and streak.
 function renderProfilePill() {
   const u = S.user;
   setKids($('profileTxt'), el('b', {}, u ? u.nickname : ''), u ? ` · ${t('pts', { n: u.points })}` : '',
     u && u.streak > 1 ? el('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '2px', marginLeft: '4px' } }, icon('flame', 14), `${u.streak}`) : null);
 }
 
+// Find the closest open, unclaimed flag to the user (or the highest priority one if location is unknown).
 function nearestFlag() {
   const p = getPos();
   const open = visibleFlags().filter((f) => f.status === 'open' && !f.claimed && !(f.mine && f.purpose === 'confirm'));
@@ -100,6 +109,7 @@ function nearestFlag() {
   return best;
 }
 
+// Draw the bottom card: the active mission if there is one, otherwise the nearest flag.
 function renderCard() {
   const card = hud.card;
   card.className = 'bottom-card';
@@ -120,16 +130,19 @@ function renderCard() {
     el('div', {}, el('div', { class: 't' }, flagTitle(f)), el('div', { class: 's' }, `${t('nearest')}${n.dist != null ? ` · ${fmtDist(n.dist)}` : ''} · ${t('pts', { n: f.reward })}`)));
 }
 
+// Check whether a position is inside the app's covered area (bounding box).
 function inAoi(p) {
   const [w, s, e, n] = S.cfg.aoi;
   return p.lat >= s && p.lat <= n && p.lon >= w && p.lon <= e;
 }
 
+// A "use demo location" button, shown only when dev tools are enabled.
 function demoButton() {
   if (!S.cfg.dev_tools) return null;
   return el('button', { onclick: () => { const [lat, lon] = S.cfg.center; setFake(lat, lon); flyTo(lat, lon, 16.5); } }, t('use_demo'));
 }
 
+// Show a banner explaining GPS state (off, denied, waiting, outside area, weak signal), if any.
 function renderGps() {
   const b = hud.gps, p = getPos();
   let msg = null, button = null;
@@ -144,6 +157,7 @@ function renderGps() {
   setKids(b, el('span', {}, msg), button);
 }
 
+// Redraw all HUD pieces.
 function renderHud() {
   if (!hud) return;
   renderProfilePill(); renderChips(); renderConds(); renderCard(); renderGps(); renderVoiceButton();
@@ -151,6 +165,7 @@ function renderHud() {
 }
 
 // ------------------------------------------------------------------ overlay menu
+// Caption text for a satellite overlay, describing which dates its imagery is from.
 function overlayNote(id) {
   const L = S.cfg.layers;
   if (id === 'ndvi' && L.ndvi) return t('ov_note_ndvi', { dates: L.ndvi.scenes.map((s) => s.date.slice(5)).join(', ') });
@@ -158,6 +173,7 @@ function overlayNote(id) {
   return '';
 }
 
+// Draw the satellite layer picker menu.
 function renderOverlayMenu() {
   const opts = [['off', 'ov_off'], ['ndvi', 'ov_ndvi'], ['lst', 'ov_lst']];
   setKids(hud.menu,
@@ -167,6 +183,7 @@ function renderOverlayMenu() {
     S.overlay !== 'off' ? el('div', { class: 'note' }, overlayNote(S.overlay)) : null);
 }
 
+// Show or hide the satellite layer picker menu.
 function toggleOverlayMenu() {
   overlayMenuOpen = !overlayMenuOpen;
   hud.menu.classList.toggle('hidden', !overlayMenuOpen);
@@ -174,11 +191,13 @@ function toggleOverlayMenu() {
   if (overlayMenuOpen) renderOverlayMenu();
 }
 
+// Remember that location is turned on, and start watching GPS.
 function enableLocation() {
   store.set('nm_loc', 'on');
   startLocation();
 }
 
+// Handle tapping the locate button: enable location if needed, or fly to the user (or the default center).
 function onLocate() {
   if (!S.fake && ['off', 'denied', 'unavailable'].includes(S.locState)) { enableLocation(); return; }
   const p = getPos();
@@ -187,6 +206,7 @@ function onLocate() {
 }
 
 // ------------------------------------------------------------------ data
+// Fetch the current flags and conditions from the server and refresh the map and HUD.
 async function loadFlags() {
   try {
     const r = await api('/api/flags');
@@ -201,10 +221,12 @@ async function loadFlags() {
   } catch (e) { /* keep the last known flags */ }
 }
 
+// Fetch the current user profile and update the HUD.
 async function loadUser() {
   try { S.user = await api('/api/me'); renderProfilePill(); } catch (e) { /* handled by auth:lost */ }
 }
 
+// If the user has an active mission from before, restore it into the app state.
 async function restoreActiveMission() {
   const active = (S.user && S.user.active_missions) || [];
   if (!active.length) return;
@@ -215,6 +237,7 @@ async function restoreActiveMission() {
 }
 
 // ------------------------------------------------------------------ app lifecycle
+// Enter the main app after login/onboarding: start location, load data, and begin polling for updates.
 async function enterApp() {
   paintAppChrome();
   renderHud();
@@ -227,6 +250,7 @@ async function enterApp() {
   if (!pollTimer) pollTimer = setInterval(() => { if (!document.hidden && S.user) loadFlags(); }, 45000);
 }
 
+// Wire up all the app-wide event bus listeners.
 function wireEvents() {
   on('pos', () => {
     pushUser(); pushMission();
@@ -247,11 +271,13 @@ function wireEvents() {
   document.addEventListener('visibilitychange', () => { if (!document.hidden && S.user) loadFlags(); });
 }
 
+// Start the app and always hide the boot splash screen afterward.
 async function boot() {
   let ok = false;
   try { ok = await startup(); } finally { if (ok !== false) hideBoot(); }
 }
 
+// Load config, set up the HUD/map/drawer, check for a logged-in user, then enter the app or show onboarding.
 async function startup() {
   S.voice = store.get('nm_voice') !== '0';
   try {
@@ -270,6 +296,7 @@ async function startup() {
   if (S.user) await enterApp(); else showOnboarding(enterApp);
 }
 
+// Set the page background and theme color to match the app (as opposed to the boot splash).
 function paintAppChrome() {
   document.documentElement.style.background = '#0f2227';
   document.body.style.background = '#0f2227';
@@ -279,6 +306,7 @@ function paintAppChrome() {
 
 const SPLASH_MS = 2300;
 
+// Hide the boot splash screen, waiting for a minimum display time and a fade-out transition.
 function hideBoot() {
   const b = $('boot');
   if (!b) return;

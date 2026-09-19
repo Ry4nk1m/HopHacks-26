@@ -1,3 +1,5 @@
+# Handles mission photo uploads: checking, resizing, hashing, saving, and cleanup.
+
 import hashlib
 import uuid
 from dataclasses import dataclass
@@ -12,12 +14,14 @@ BLUR_MIN = 20.0
 NEAR_DUPLICATE_BITS = 4
 
 
+# Error raised when an uploaded photo fails a check (too small, blurry, etc).
 class PhotoError(Exception):
     def __init__(self, code):
         super().__init__(code)
         self.code = code
 
 
+# Holds a processed photo and the info computed about it.
 @dataclass
 class Photo:
     jpeg: bytes
@@ -28,12 +32,14 @@ class Photo:
     height: int
 
 
+# Make a short fingerprint of an image's look, used to spot near-duplicate photos.
 def average_hash(img):
     small = cv2.resize(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), (8, 8), interpolation=cv2.INTER_AREA)
     bits = (small > small.mean()).flatten()
     return "".join("1" if b else "0" for b in bits)
 
 
+# Count how many bits differ between two hashes (used to compare average_hash results).
 def hamming(a, b):
     return sum(x != y for x, y in zip(a, b))
 
@@ -66,6 +72,7 @@ def process_upload(data, blur_min=BLUR_MIN):
     return Photo(jpeg, hashlib.sha256(jpeg).hexdigest(), average_hash(img), round(sharp, 1), w, h)
 
 
+# Save a photo's bytes to disk under a dated folder and return its relative path.
 def save_photo(settings, jpeg):
     now = datetime.now(timezone.utc)
     rel = f"photos/{now:%Y/%m}/{uuid.uuid4().hex}.jpg"
@@ -86,6 +93,7 @@ def find_duplicate(conn, photo, flag_id=None, user_id=None):
     return False
 
 
+# Store a photo's hashes in the database so future uploads can be checked against it.
 def remember_photo(conn, photo, user_id, flag_id, now_iso):
     conn.execute("INSERT OR IGNORE INTO photo_hashes (sha256, ahash, user_id, flag_id, created_at) VALUES (?,?,?,?,?)",
                  (photo.sha256, photo.ahash, user_id, flag_id, now_iso))

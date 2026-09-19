@@ -1,3 +1,5 @@
+// Profile, about, and demo tools sheets: shows points/badges/leaderboard and dev-only test controls.
+
 import { S } from './state.js';
 import { emit } from './bus.js';
 import { api } from './api.js';
@@ -9,11 +11,13 @@ import { stopVoice } from './voice.js';
 let boardTab = 'weekly';
 const short = (s) => (s.length > 28 ? `${s.slice(0, 27)}…` : s);
 
+// Fetch the leaderboard and neighborhood impact stats, ignoring either if it fails.
 async function loadExtras() {
   const [board, impact] = await Promise.all([api('/api/leaderboard', { auth: false }).catch(() => null), api('/api/impact', { auth: false }).catch(() => null)]);
   return { board, impact };
 }
 
+// Show the "About" sheet with app info, privacy notes, and data credits.
 export function openAbout() {
   const days = (S.cfg && S.cfg.photo_retention_days) || 14;
   openSheet(
@@ -29,6 +33,7 @@ export function openAbout() {
     el('div', { class: 'actions' }, el('button', { class: 'btn', onclick: closeSheet }, t('close'))));
 }
 
+// Show the profile sheet: stats, badges, and the leaderboard.
 export async function openProfile() {
   const { board, impact } = await loadExtras();
   const u = S.user;
@@ -57,6 +62,7 @@ export async function openProfile() {
   openSheet(...parts);
 }
 
+// Build the dev-only demo controls: teleport near a flag, force weather conditions, refresh or reset data.
 export function demoTools(reopen, done) {
   const forced = (S.conditions && S.conditions.forced) || {};
   const p = getPos();

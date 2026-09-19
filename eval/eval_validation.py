@@ -51,6 +51,7 @@ def summarize(results):
     }
 
 
+# Run the validator over a folder of labeled photos and print accuracy/precision/recall per flag type.
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", default="eval/photos")
@@ -64,6 +65,7 @@ def main(argv=None):
     if not root.exists():
         sys.exit(f"{root} does not exist; see the docstring for the folder layout")
 
+    # Walk each flag_type/label folder, run the validator on every photo, and record predicted vs actual.
     per_type, raw = {}, []
     for type_dir in sorted(p for p in root.iterdir() if p.is_dir() and p.name in FLAG_TYPES):
         for label_dir in sorted(p for p in type_dir.iterdir() if p.is_dir()):

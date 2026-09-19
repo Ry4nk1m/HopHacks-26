@@ -25,16 +25,19 @@ REPORT_DEDUPE_M = 25
 REPORT_DEDUPE_HOURS = 24
 CONFIRM_RADIUS_M = 60
 
+# Confidence thresholds used when the AI validator checks a photo.
 VERIFIED_MIN = 0.70
 REVIEW_MIN = 0.40
 REPORT_AUTO_CONFIRM_MIN = 0.85
 
+# Point values for reports, confirmations, and daily streak bonuses.
 BEFORE_PHOTO_BONUS = 5
 REPORT_POINTS = 10
 CONFIRM_POINTS = 3
 STREAK_STEP = 0.10
 STREAK_MAX_BONUS = 0.50
 
+# What it takes to unlock each badge.
 BADGES = {
     "first_mission": {"verified": 1},
     "ten_missions": {"verified": 10},
@@ -50,6 +53,7 @@ NICKNAME_MIN, NICKNAME_MAX = 2, 20
 LANGS = ("en",)
 
 
+# Work out how many points a completed mission is worth, including the before-photo and streak bonuses.
 def mission_points(flag_type, urgency, streak, has_before):
     base = FLAG_TYPES[flag_type]["points"] * URGENCY_MULTIPLIER.get(urgency, 1.0)
     if has_before:

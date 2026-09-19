@@ -1,3 +1,6 @@
+# Fetches weather, storm alerts, and city 311 requests, and turns them into simple
+# heat/rain/dry conditions the rest of the app can use.
+
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -5,12 +8,14 @@ import httpx
 
 from . import db
 
+# API endpoints for weather, storm alerts, and city 311 data.
 OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
 NWS_ALERTS = "https://api.weather.gov/alerts/active"
 CITY_311 = ("https://services1.arcgis.com/UWYHeuuJISiGmgXx/arcgis/rest/services/"
             "311_Customer_Service_Requests_current/FeatureServer/0/query")
 UA = {"User-Agent": "neighborhood-missions/0.1 (hackathon project)", "Accept": "application/json"}
 
+# Thresholds used to decide if it counts as a heat, rain, or dry day.
 HEAT_APPARENT_C = 32.0      # about 90 F
 RAIN_SOON_MM = 10.0
 RAIN_SOON_MM_WITH_PROB = 6.0
@@ -30,25 +35,30 @@ CITY_TYPES = {
     "FOR-Broken Branch in Tree": ("problem_report", "broken_branch", 30, 15),
     "FOR-Tree Maintenance": ("problem_report", "tree_issue", 30, 15),
 }
+# Conditions that can be manually forced on or off instead of decided automatically.
 FORCE_KEYS = ("heat", "rain", "dry")
 
 
+# Save a signal's value to the database, keyed by name.
 def save_signal(conn, key, value):
     conn.execute("INSERT INTO signals (key, value, fetched_at) VALUES (?,?,?) "
                  "ON CONFLICT(key) DO UPDATE SET value=excluded.value, fetched_at=excluded.fetched_at",
                  (key, json.dumps(value), db.now_iso()))
 
 
+# Load a saved signal's value, along with when it was last fetched.
 def load_signal(conn, key):
     r = conn.execute("SELECT value, fetched_at FROM signals WHERE key=?", (key,)).fetchone()
     return (json.loads(r["value"]), r["fetched_at"]) if r else (None, None)
 
 
+# Drop missing values from a list and return the remaining values plus their max (or a default).
 def _num(vals, default=0.0):
     vals = [v for v in vals if v is not None]
     return vals, (max(vals) if vals else default)
 
 
+# Get rain and temperature forecasts from Open-Meteo for the area.
 def fetch_weather(settings, client, now=None):
     lat, lon = settings.center
     r = client.get(OPEN_METEO, params={
@@ -59,9 +69,11 @@ def fetch_weather(settings, client, now=None):
     daily = data["daily"]
     times = daily["time"]
     now = now or datetime.now(timezone.utc)
+    # Find which row in the forecast data corresponds to today, in the area's local time.
     local_today = (now + timedelta(seconds=data.get("utc_offset_seconds", 0))).date().isoformat()
     i = times.index(local_today) if local_today in times else min(7, len(times) - 1)
 
+    # Sum a daily value over a range of days, treating missing days as zero.
     def total(key, a, b):
         return round(sum(v or 0 for v in daily[key][max(a, 0):b]), 1)
 
@@ -74,6 +86,7 @@ def fetch_weather(settings, client, now=None):
         "max_apparent_next3_c": app_max, "max_temp_c": t_max}}
 
 
+# Get active weather alerts from the National Weather Service for the area.
 def fetch_nws(settings, client):
     lat, lon = settings.center
     r = client.get(NWS_ALERTS, params={"point": f"{lat:.4f},{lon:.4f}"}, headers=UA)
@@ -85,6 +98,7 @@ def fetch_nws(settings, client):
     return {"events": events}
 
 
+# Get open 311 service requests from the city that match the report types we track.
 def fetch_311(settings, client, now=None):
     w, s, e, n = settings.aoi
     types = ",".join("'" + t + "'" for t in CITY_TYPES)
@@ -109,6 +123,7 @@ def fetch_311(settings, client, now=None):
             created = datetime.fromtimestamp(a["CreatedDate"] / 1000, tz=timezone.utc)
         except (TypeError, ValueError, KeyError):
             continue
+        # Skip requests that are too old, outside the area, or over the per-type cap.
         if now - created > timedelta(days=cfg[2]) or not (s <= lat <= n and w <= lon <= e):
             continue
         if per_type.get(a["SRType"], 0) >= cfg[3]:
@@ -127,6 +142,7 @@ def refresh_signals(settings, db_path, client=None, now=None):
     client = client or httpx.Client(timeout=30, follow_redirects=True)
     status = {}
     try:
+        # Try each source on its own, so one failing does not stop the others from updating.
         for key, fn in (("weather", fetch_weather), ("nws", fetch_nws), ("city311", fetch_311)):
             try:
                 value = fn(settings, client, now) if key != "nws" else fn(settings, client)
@@ -143,6 +159,7 @@ def refresh_signals(settings, db_path, client=None, now=None):
     return status
 
 
+# Manually force a condition on, off, or back to automatic.
 def set_forced(conn, name, mode):
     if name not in FORCE_KEYS or mode not in ("on", "off", "auto"):
         raise ValueError("bad trigger")
@@ -153,6 +170,7 @@ def set_forced(conn, name, mode):
     return forced
 
 
+# Combine weather, alerts, and any manual overrides into today's heat/rain/dry conditions.
 def conditions(conn):
     weather, weather_at = load_signal(conn, "weather")
     nws, _ = load_signal(conn, "nws")
@@ -160,8 +178,10 @@ def conditions(conn):
     forced = forced or {}
     m = (weather or {}).get("metrics") or {}
     events = (nws or {}).get("events") or []
+    # Check the active alerts for heat or flood warnings.
     heat_alert = any("heat" in e["event"].lower() for e in events)
     flood_alert = any("flood" in e["event"].lower() for e in events)
+    # Decide each condition automatically from alerts and forecast numbers.
     app = m.get("max_apparent_next3_c")
     auto_heat = heat_alert or (app is not None and app >= HEAT_APPARENT_C)
     next2 = m.get("next2_mm") or 0
@@ -169,6 +189,7 @@ def conditions(conn):
     auto_dry = bool(m) and (m.get("past7_mm", 99) <= DRY_PAST7_MM and (m.get("next3_mm", 99) <= DRY_NEXT3_MM)
                             and (m.get("max_temp_c") or 0) >= DRY_MIN_TEMP_C)
 
+    # Use the forced setting if one was set, otherwise fall back to the automatic result.
     def pick(name, auto):
         mode = forced.get(name, "auto")
         return True if mode == "on" else False if mode == "off" else auto

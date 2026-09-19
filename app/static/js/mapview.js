@@ -1,8 +1,11 @@
+// Sets up and drives the MapLibre map: base style, flag/user/mission layers, overlays, and pan/zoom actions.
+
 import { S, visibleFlags } from './state.js';
 import { emit } from './bus.js';
 import { circlePolygon, getPos } from './geo.js';
 import { TYPE_COLOR, TYPE_GLYPH } from './ui.js';
 
+// Backup raster map style, used if the main vector style fails to load.
 const RASTER_FALLBACK = {
   version: 8,
   sources: { osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 19, attribution: '© OpenStreetMap contributors' } },
@@ -19,6 +22,7 @@ let pulseTimer = null;
 
 export const isReady = () => ready;
 
+// Draw a flag icon (colored circle with a glyph) onto a canvas, for use as a map marker image.
 function drawIcon(type, dim) {
   const s = 64, c = document.createElement('canvas');
   c.width = c.height = s;
@@ -55,6 +59,7 @@ function drawIcon(type, dim) {
   return g.getImageData(0, 0, s, s);
 }
 
+// Register a normal and a dimmed marker image for each flag type.
 function addIcons() {
   Object.keys(TYPE_COLOR).forEach((type) => {
     [false, true].forEach((dim) => {
@@ -64,6 +69,7 @@ function addIcons() {
   });
 }
 
+// Add the satellite overlay image sources/layers (vegetation, heat) and the NASA daily image layer.
 function addOverlays() {
   const L = S.cfg.layers;
   if (L.bounds) {
@@ -74,6 +80,7 @@ function addOverlays() {
   }
 }
 
+// Add the map layers that draw flags: clusters, cluster counts, a pulse for urgent flags, the selection ring, and the flag icons.
 function addFlagLayers() {
   if (!map.getSource('flags')) map.addSource('flags', { type: 'geojson', data: EMPTY, cluster: true, clusterRadius: 44, clusterMaxZoom: 16 });
   const hasGlyphs = !!map.getStyle().glyphs;
@@ -91,6 +98,7 @@ function addFlagLayers() {
     layout: { 'icon-image': ['get', 'icon'], 'icon-size': ['match', ['get', 'urgency'], 3, 1.15, 2, 1.0, 0.85], 'icon-allow-overlap': true, 'icon-ignore-placement': true } });
 }
 
+// Add the map layers for the user's own position and the line/ring to the active mission's flag.
 function addUserAndMission() {
   ['me', 'me-acc', 'mission'].forEach((id) => { if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: EMPTY }); });
   map.addLayer({ id: 'mission-ring', type: 'circle', source: 'mission', filter: ['==', ['geometry-type'], 'Point'],
@@ -139,6 +147,7 @@ function tuneBasemap() {
   paint('road_motorway_casing', 'line-color', '#c98f47');
 }
 
+// Run once the map style has loaded: set up all layers and push in the current data.
 function setupLayers() {
   ready = false;
   tuneBasemap();
@@ -155,6 +164,7 @@ function setupLayers() {
   emit('map:ready');
 }
 
+// Animate the pulsing circle drawn under high-urgency flags.
 function startPulse() {
   if (pulseTimer) clearInterval(pulseTimer);
   let phase = 0;
@@ -166,12 +176,14 @@ function startPulse() {
   }, 90);
 }
 
+// Check whether a map error is about the base map style/tiles failing to load.
 function isBaseError(e) {
   const id = e && e.sourceId;
   if (id) return id === 'openmaptiles' || id === 'ne2_shaded' || id === 'osm';
   return !!(e && e.error && /style|fetch|network|failed/i.test(String(e.error.message || '')));
 }
 
+// Create the map, wire up click/hover handlers, the fallback-on-error logic, and long-press to teleport.
 export function initMap(cfg) {
   map = new maplibregl.Map({
     container: 'map', style: cfg.map_style_url, center: [cfg.center[1], cfg.center[0]], zoom: 15.4, minZoom: 10.5, maxZoom: 19.5,
@@ -213,6 +225,7 @@ export function initMap(cfg) {
   return map;
 }
 
+// Send the current visible flags to the map as GeoJSON points.
 export function pushFlags() {
   if (!ready) return;
   const list = visibleFlags();
@@ -226,6 +239,7 @@ export function pushFlags() {
   });
 }
 
+// Update the map with the user's current position and accuracy circle.
 export function pushUser() {
   if (!ready) return;
   const p = getPos();
@@ -234,6 +248,7 @@ export function pushUser() {
   map.getSource('me-acc').setData(p.fake ? EMPTY : circlePolygon(p.lat, p.lon, Math.max(p.acc || 0, 3)));
 }
 
+// Update the map with the active mission's flag and a line from the user to it.
 export function pushMission() {
   if (!ready) return;
   const src = map.getSource('mission');
@@ -244,6 +259,7 @@ export function pushMission() {
   src.setData({ type: 'FeatureCollection', features: feats });
 }
 
+// Switch which satellite overlay layer is visible.
 export function setOverlay(name) {
   S.overlay = name;
   if (!ready) return;
@@ -252,18 +268,22 @@ export function setOverlay(name) {
   });
 }
 
+// Highlight the flag with the given id (or clear the highlight if id is null).
 export function setSelected(id) {
   if (ready && map.getLayer('flag-selected')) map.setFilter('flag-selected', ['==', ['get', 'id'], id == null ? -1 : id]);
 }
 
+// Animate the map to center on a point at a given zoom level.
 export function flyTo(lat, lon, zoom) {
   if (map) map.flyTo({ center: [lon, lat], zoom: zoom || Math.max(map.getZoom(), 17), speed: 1.4, essential: true });
 }
 
+// Instantly move the map to a point, with no animation.
 export function jumpTo(lat, lon, zoom) {
   if (map) map.jumpTo({ center: [lon, lat], zoom: zoom || map.getZoom() });
 }
 
+// Fly the map to the user's current position, if known.
 export function flyToUser() {
   const p = getPos();
   if (p) flyTo(p.lat, p.lon, 17);
