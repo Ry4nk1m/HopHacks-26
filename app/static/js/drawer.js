@@ -1,7 +1,7 @@
 // The side drawer menu: profile, settings, and demo tools. Can be opened by swiping from the screen edge.
 
 import { S, store } from './state.js';
-import { el, icon, closeSheet, toast } from './ui.js';
+import { el, icon, closeSheet, toast, TYPE_ICON, TYPE_COLOR, TYPE_GLYPH } from './ui.js';
 import { t } from './i18n.js';
 import { openProfile, openAbout, demoTools, weatherTools } from './profile.js';
 import { api } from './api.js';
@@ -118,6 +118,12 @@ function render() {
     row('info', t('menu_about'), null, after(openAbout)),
     el('h3', {}, t('mission_h')),
     el('p', { class: 'dr-mission' }, t('mission_body')),
+    el('h3', {}, t('types_h')),
+    // the same four groups as the filter chips on the map
+    ...[['tree', 'tree_water'], ['drain', 'drain_clear'], ['cooling', 'cooling_check'], ['reports', 'problem_report']].map(([key, type]) =>
+      el('div', { class: 'dr-def' },
+        el('span', { class: 'dr-def-ic', style: { background: TYPE_COLOR[type], color: TYPE_GLYPH[type] } }, icon(TYPE_ICON[type], 16)),
+        el('div', {}, el('b', {}, t(`def_${key}_title`)), el('p', {}, t(`def_${key}`))))),
   ];
   const unlocked = !S.cfg.dev_tools && !!store.get('nm_test');
   if (unlocked) {
