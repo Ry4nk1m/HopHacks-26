@@ -186,7 +186,8 @@ function isBaseError(e) {
 // Create the map, wire up click/hover handlers, the fallback-on-error logic, and long-press to teleport.
 export function initMap(cfg) {
   map = new maplibregl.Map({
-    container: 'map', style: cfg.map_style_url, center: [cfg.center[1], cfg.center[0]], zoom: 15.4, minZoom: 10.5, maxZoom: 19.5,
+    container: 'map', style: cfg.map_style_url, center: [cfg.center[1], cfg.center[0]], zoom: 13, minZoom: 10.5, maxZoom: 19.5,
+    maxBounds: [[cfg.aoi[0] - 0.05, cfg.aoi[1] - 0.05], [cfg.aoi[2] + 0.05, cfg.aoi[3] + 0.05]],
     attributionControl: false, dragRotate: false, pitchWithRotate: false, fadeDuration: 100,
   });
   if (cfg.dev_tools) window.__map = map; // handy for demos and debugging

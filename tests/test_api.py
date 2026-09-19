@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app import db, signals
+from app import db, signals, triggers
 from app.config import Settings
 from app.main import create_app
 from tests.helpers import Scripted, blurry_photo, photo_bytes
@@ -479,7 +479,7 @@ def test_report_limits_and_three_reports_earn_a_badge(env):
 def test_dev_tools_force_conditions_and_reset(env):
     u = signup(env)
     assert env.client.post("/api/dev/force", json={"name": "dry", "mode": "on"}).json()["sync"]["conditions"]["dry"] is True
-    assert len([f for f in env.client.get("/api/flags").json()["flags"] if f["type"] == "tree_water"]) == 60
+    assert len([f for f in env.client.get("/api/flags").json()["flags"] if f["type"] == "tree_water"]) == triggers.TREE_LIMIT
     env.client.post("/api/dev/force", json={"name": "heat", "mode": "on"})
     assert {f["urgency"] for f in env.client.get("/api/flags").json()["flags"] if f["type"] == "cooling_check"} == {2, 3}
     assert env.client.post("/api/dev/force", json={"name": "hail", "mode": "on"}).status_code == 422

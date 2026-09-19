@@ -104,7 +104,7 @@ const EN = {
   cond_heat: 'Heat alert', cond_rain: 'Heavy rain expected', cond_dry: 'Dry spell', cond_demo: 'demo',
   nearest: 'Nearest', nothing_near: 'No flags match this filter', mission_active: 'Mission in progress',
   gps_denied: 'Location is off. Turn it on to see flags near you.', gps_waiting: 'Finding your location…',
-  gps_outside: "You're outside the Homewood area, so no flags are near you.", gps_weak: 'Weak GPS (±{a}). Move to open sky.',
+  gps_outside: "You're outside Baltimore, so no flags are near you.", gps_weak: 'Weak GPS (±{a}). Move to open sky.',
   use_demo: 'Use demo location', demo_banner: 'Demo mode: photo checks are simulated.',
   just_now: 'just now', min_ago: '{n} min ago', hours_ago: '{n} h ago', days_ago: '{n} d ago',
   brief: 'Mission accepted. {title}. {task} Stay safe and watch for traffic.',

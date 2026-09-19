@@ -9,8 +9,8 @@ ROOT = Path(__file__).resolve().parent.parent
 APP_NAME = "Parasol"
 SITE_NAME = "TheUmbrellaClub"
 
-# Johns Hopkins Homewood area (west, south, east, north)
-DEFAULT_AOI = (-76.645, 39.310, -76.595, 39.350)
+# All of Baltimore City (west, south, east, north)
+DEFAULT_AOI = (-76.712, 39.203, -76.529, 39.373)
 
 
 # Read key=value lines from a .env file and load them into the environment.

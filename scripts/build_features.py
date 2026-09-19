@@ -7,6 +7,7 @@ Sources: OpenStreetMap (trees, storm drains, libraries, community centres) via O
 """
 import json
 import sys
+import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -16,7 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.config import ROOT, load_settings  # noqa: E402
 
 UA = {"User-Agent": "neighborhood-missions/0.1 (hackathon build script)"}
-OVERPASS = "https://overpass-api.de/api/interpreter"
+OVERPASSES = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]
+TILES = 3  # the area is fetched as TILES x TILES pieces so no single Overpass query is big enough to time out
 COOLING = ("https://services1.arcgis.com/UWYHeuuJISiGmgXx/arcgis/rest/services/"
            "Code_Red_Cooling_Center_New/FeatureServer/0/query")
 
@@ -28,11 +30,45 @@ def fetch(url, data=None, timeout=120):
         return json.loads(resp.read())
 
 
+# Run one Overpass query, retrying on timeouts and falling back to a second public server.
+def overpass(query, tries=4):
+    body = urllib.parse.urlencode({"data": query}).encode()
+    last = None
+    for attempt in range(tries):
+        url = OVERPASSES[attempt % len(OVERPASSES)]
+        try:
+            return fetch(url, body, timeout=150)
+        except Exception as exc:  # 429/504/timeouts are routine on the public servers
+            last = exc
+            print(f"  overpass retry {attempt + 1}: {str(exc)[:80]}")
+            time.sleep(6 * (attempt + 1))
+    raise RuntimeError(f"Overpass failed: {last}")
+
+
+# Cut the area into a grid of smaller boxes.
+def tiles(aoi, n=TILES):
+    w, s, e, n_ = aoi
+    dx, dy = (e - w) / n, (n_ - s) / n
+    return [(w + i * dx, s + j * dy, w + (i + 1) * dx, s + (j + 1) * dy) for j in range(n) for i in range(n)]
+
+
 # Query Overpass for trees, storm drains, and community spaces inside the area, and normalize them into feature dicts.
 def osm_features(aoi):
+    seen, out = set(), []
+    for i, box in enumerate(tiles(aoi), 1):
+        print(f"OpenStreetMap tile {i}/{TILES * TILES}")
+        for f in osm_tile(box):
+            if f["id"] not in seen:  # a way or node on a tile edge can come back twice
+                seen.add(f["id"])
+                out.append(f)
+    return out
+
+
+# One tile's worth of OSM features.
+def osm_tile(aoi):
     w, s, e, n = aoi
     bbox = f"{s},{w},{n},{e}"
-    q = f"""[out:json][timeout:90];
+    q = f"""[out:json][timeout:120];
 (
  node["natural"="tree"]({bbox});
  node["man_made"="storm_drain"]({bbox});
@@ -41,7 +77,7 @@ def osm_features(aoi):
  way["amenity"~"^(library|community_centre)$"]({bbox});
 );
 out center tags;"""
-    data = fetch(OVERPASS, urllib.parse.urlencode({"data": q}).encode())
+    data = overpass(q)
     out = []
     for el in data["elements"]:
         tags = el.get("tags", {})

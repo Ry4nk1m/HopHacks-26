@@ -12,15 +12,13 @@ def load_snapshot(conn, settings):
     if not path.exists():
         return 0
     snap = json.loads(path.read_text())
-    n = 0
+    rows = [(f["id"], f["kind"], f["source"], f["name"], f["lat"], f["lon"], json.dumps(f.get("tags", {}))) for f in snap["features"]]
     # Insert each feature, or update it if a feature with that id already exists.
-    for f in snap["features"]:
-        conn.execute(
-            "INSERT INTO features (id, kind, source, name, lat, lon, tags) VALUES (?,?,?,?,?,?,?) "
-            "ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, source=excluded.source, name=excluded.name, "
-            "lat=excluded.lat, lon=excluded.lon, tags=excluded.tags",
-            (f["id"], f["kind"], f["source"], f["name"], f["lat"], f["lon"], json.dumps(f.get("tags", {}))))
-        n += 1
+    conn.executemany(
+        "INSERT INTO features (id, kind, source, name, lat, lon, tags) VALUES (?,?,?,?,?,?,?) "
+        "ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, source=excluded.source, name=excluded.name, "
+        "lat=excluded.lat, lon=excluded.lon, tags=excluded.tags", rows)
+    n = len(rows)
     return n
 
 

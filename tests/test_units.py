@@ -1,6 +1,7 @@
 # Unit tests for the app's individual modules: geo, rules, satellite, photos, validation, signals, triggers, and users.
 import json
 import sqlite3
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -278,6 +279,31 @@ def test_condition_rules_and_forcing(settings):
             signals.set_forced(c, "heat", "maybe")
 
 
+# A whole city has thousands of open requests: fetching must page through them, and stop once the rest are too old to keep.
+def test_fetch_311_reads_further_pages_until_requests_are_too_old(settings):
+    now = datetime(2026, 9, 19, tzinfo=timezone.utc)
+    ms = lambda days: int((now - timedelta(days=days)).timestamp() * 1000)
+    row = lambda d, i: {"attributes": {"SRType": "FOR-Down Tree", "SRStatus": "Open", "CreatedDate": ms(d), "Address": "1 MAIN ST, Baltimore City",
+                                       "Neighborhood": "X", "Latitude": "39.30", "Longitude": "-76.62", "ServiceRequestNum": f"r{i}"}}
+
+    class Paged:
+        def __init__(self, pages):
+            self.pages, self.offsets = pages, []
+
+        def get(self, url, params=None, headers=None):
+            self.offsets.append(params["resultOffset"])
+            body = self.pages[min(params["resultOffset"] // signals.PAGE_311, len(self.pages) - 1)]
+            return SimpleNamespace(raise_for_status=lambda: None, json=lambda: body)
+
+    fresh = [row(2, i) for i in range(signals.PAGE_311)]
+    second = [row(3, 10_000 + i) for i in range(5)]
+    c = Paged([{"features": fresh, "exceededTransferLimit": True}, {"features": second}])
+    rows = signals.fetch_311(settings, c, now)["requests"]
+    assert c.offsets == [0, signals.PAGE_311] and len(rows) == signals.CITY_TYPES["FOR-Down Tree"][3]  # both pages read, then the per-type cap applies
+    old = Paged([{"features": [row(60, i) for i in range(signals.PAGE_311)], "exceededTransferLimit": True}])
+    signals.fetch_311(settings, old, now)
+    assert old.offsets == [0]  # the newest request on the page is already too old, so no more pages are fetched
+
 # Check that 311 request fetching filters by age, area, status, and type.
 def test_fetch_311_filters_age_area_status_and_caps(settings):
     now = datetime(2026, 9, 19, tzinfo=timezone.utc)
@@ -363,7 +389,9 @@ def test_rain_flags_drains_with_urgency_and_heat_flags_cooling(world):
     sync(world, lambda c: _store(c, weather=WET))
     _, path, _ = world
     drains = flags(path, type="drain_clear", source="trigger", status="open")
-    assert len(drains) == 14 and all(d["urgency"] == 3 for d in drains)
+    with db.connect(path) as c:
+        known = c.execute("SELECT COUNT(*) n FROM features WHERE kind='drain'").fetchone()["n"]
+    assert len(drains) == known > 0 and all(d["urgency"] == 3 for d in drains)
     sync(world, lambda c: _store(c, weather=HOT))
     cooling = flags(path, type="cooling_check", status="open")
     assert cooling and {c["urgency"] for c in cooling} == {2, 3}

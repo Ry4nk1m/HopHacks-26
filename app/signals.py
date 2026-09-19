@@ -26,16 +26,18 @@ DRY_MIN_TEMP_C = 22.0
 
 # 311 request type -> (flag type, category, max age in days, cap)
 CITY_TYPES = {
-    "WW-Storm Inlet Choke": ("drain_clear", "storm_inlet_choke", 30, 40),
-    "WW-Storm Flooded Street": ("flood_report", "flooded_street", 5, 30),
-    "WW-Storm Damaged Inlet": ("problem_report", "damaged_inlet", 30, 15),
-    "HCD-Illegal Dumping": ("problem_report", "illegal_dumping", 30, 20),
-    "SW-Dirty Street": ("problem_report", "litter", 21, 20),
-    "FOR-Down Tree": ("problem_report", "fallen_tree", 30, 15),
-    "FOR-Broken Branch in Tree": ("problem_report", "broken_branch", 30, 15),
-    "FOR-Tree Maintenance": ("problem_report", "tree_issue", 30, 15),
+    "WW-Storm Inlet Choke": ("drain_clear", "storm_inlet_choke", 30, 100),
+    "WW-Storm Flooded Street": ("flood_report", "flooded_street", 5, 100),
+    "WW-Storm Damaged Inlet": ("problem_report", "damaged_inlet", 30, 100),
+    "HCD-Illegal Dumping": ("problem_report", "illegal_dumping", 30, 150),
+    "SW-Dirty Street": ("problem_report", "litter", 21, 250),
+    "FOR-Down Tree": ("problem_report", "fallen_tree", 30, 100),
+    "FOR-Broken Branch in Tree": ("problem_report", "broken_branch", 30, 100),
+    "FOR-Tree Maintenance": ("problem_report", "tree_issue", 30, 300),
 }
 # Conditions that can be manually forced on or off instead of decided automatically.
+PAGE_311 = 1000
+MAX_311_PAGES = 6
 FORCE_KEYS = ("heat", "rain", "dry")
 
 
@@ -102,18 +104,31 @@ def fetch_nws(settings, client):
 def fetch_311(settings, client, now=None):
     w, s, e, n = settings.aoi
     types = ",".join("'" + t + "'" for t in CITY_TYPES)
-    r = client.get(CITY_311, params={
-        "where": f"SRType IN ({types}) AND SRStatus IN ('New','Open')",
-        "geometry": f"{w},{s},{e},{n}", "geometryType": "esriGeometryEnvelope", "inSR": 4326, "spatialRel": "esriSpatialRelIntersects",
-        "outFields": "SRRecordID,ServiceRequestNum,SRType,SRStatus,CreatedDate,Address,Neighborhood,Latitude,Longitude",
-        "returnGeometry": "false", "orderByFields": "CreatedDate DESC", "resultRecordCount": 1000, "f": "json"}, headers=UA)
-    r.raise_for_status()
-    body = r.json()
-    if "error" in body:
-        raise RuntimeError(f"311 service error: {body['error'].get('message')}")
     now = now or datetime.now(timezone.utc)
+    oldest_wanted = now - timedelta(days=max(c[2] for c in CITY_TYPES.values()))
+    # a whole city has thousands of open requests: read newest-first, a page at a time, until they are older than any type keeps
+    feats = []
+    for page in range(MAX_311_PAGES):
+        r = client.get(CITY_311, params={
+            "where": f"SRType IN ({types}) AND SRStatus IN ('New','Open')",
+            "geometry": f"{w},{s},{e},{n}", "geometryType": "esriGeometryEnvelope", "inSR": 4326, "spatialRel": "esriSpatialRelIntersects",
+            "outFields": "SRRecordID,ServiceRequestNum,SRType,SRStatus,CreatedDate,Address,Neighborhood,Latitude,Longitude",
+            "returnGeometry": "false", "orderByFields": "CreatedDate DESC", "resultOffset": page * PAGE_311,
+            "resultRecordCount": PAGE_311, "f": "json"}, headers=UA)
+        r.raise_for_status()
+        body = r.json()
+        if "error" in body:
+            raise RuntimeError(f"311 service error: {body['error'].get('message')}")
+        got = body.get("features", [])
+        feats.extend(got)
+        try:
+            last = datetime.fromtimestamp(got[-1]["attributes"]["CreatedDate"] / 1000, tz=timezone.utc)
+        except (IndexError, KeyError, TypeError, ValueError):
+            break
+        if not body.get("exceededTransferLimit") or len(got) < PAGE_311 or last < oldest_wanted:
+            break
     per_type, rows = {}, []
-    for f in body.get("features", []):
+    for f in feats:
         a = f["attributes"]
         cfg = CITY_TYPES.get(a.get("SRType"))
         if not cfg:

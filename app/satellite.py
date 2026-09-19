@@ -54,7 +54,8 @@ class SatelliteGrid:
     # Find where a value ranks (0 to 1) within a sorted list of values.
     @staticmethod
     def _pct(sorted_vals, v):
-        return float(np.searchsorted(sorted_vals, v) / len(sorted_vals)) if len(sorted_vals) else None
+        # match the array's dtype: searching a float32 array with a python float would convert the whole array on every call
+        return float(np.searchsorted(sorted_vals, sorted_vals.dtype.type(v)) / len(sorted_vals)) if len(sorted_vals) else None
 
     # Look up vegetation and heat for a location, plus how they rank against the rest of the area.
     def sample(self, lat, lon):

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel, Field
@@ -158,6 +159,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
         yield
 
     app = FastAPI(title=APP_NAME, docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=lifespan)
+    app.add_middleware(GZipMiddleware, minimum_size=1000)  # a city's worth of flags is a lot of JSON; this shrinks it about 10x
     app.state.settings = settings
     app.state.limiter = limiter
     app.state.sync = sync

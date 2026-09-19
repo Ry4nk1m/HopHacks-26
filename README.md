@@ -3,7 +3,7 @@
 By TheUmbrellaClub. Small neighborhood tasks, guided by satellite data.
 
 A mobile-first map app where **satellites and city data show where small tasks would help**, volunteers do them, and
-**Gemini checks the photo**. Built for the Johns Hopkins Homewood area of Baltimore (the area is configurable).
+**Gemini checks the photo**. Covers all of Baltimore City (the area is configurable).
 
 Open the app, see flags on a map, tap one, walk there, do the task, take a photo, and earn points. Flags are
 tasks like *water this tree during a dry spell*, *clear this storm drain before heavy rain*, *verify a cooling
@@ -94,7 +94,7 @@ on real photos taken in the field.
 
 ## Known limits
 
-- Only the Homewood area has bundled data; other areas need the two build scripts.
+- Only Baltimore City has bundled data; other areas need the two build scripts.
 - Satellite imagery is days to weeks old and about 30 m per pixel; clouds mean some scenes are skipped.
 - OpenStreetMap has good tree coverage here but only a handful of mapped storm drains, so most drain flags come from 311 reports or heavy-rain triggers.
 - A volunteer can spoof GPS. Arrival checks and photo checks reduce abuse but do not prove presence.
@@ -117,6 +117,6 @@ deploy/         docker-compose and Caddy for a small server
 
 The app ships with a satellite snapshot (`app/data/satellite.json`). While running, it checks every 6 hours and, once the snapshot is
 14 days old, rebuilds it from the newest low-cloud Sentinel-2 and Landsat scenes on Microsoft Planetary Computer. The build runs in a
-separate process (about 15 seconds, under 100 MB), is checked before it replaces the old snapshot, and the old one keeps serving if anything
+separate process (about 20 seconds, under 200 MB for the whole city), is checked before it replaces the old snapshot, and the old one keeps serving if anything
 fails. The new file lives in the data directory, so on a host with temporary storage it is lost on redeploy and the bundled snapshot is used
 again until the next refresh. Set `SATELLITE_REFRESH_DAYS=0` to turn this off. In dev mode, `POST /api/dev/satellite` runs it now.

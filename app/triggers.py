@@ -8,10 +8,10 @@ from . import db, rules, signals
 from .features import features_in_aoi
 from .geo import haversine_m
 
-TREE_LIMIT = 60
-TREE_MIN_SEP_M = 45
+TREE_LIMIT = 150
+TREE_MIN_SEP_M = 150
 TREE_STRONG_NEED = 0.70
-MAX_ACTIVE_FLAGS = 300
+MAX_ACTIVE_FLAGS = 2000
 
 
 # Format a datetime as an ISO string without microseconds.
@@ -32,10 +32,12 @@ def select_priority_trees(trees, satellite, exclude_ids, limit=TREE_LIMIT, min_s
     # Group trees into a grid of cells so the "too close to an already-picked tree" check only
     # has to look at nearby cells instead of every tree picked so far.
     chosen, cells = [], {}
+    reach = int(min_sep_m // 80) + 1  # grid cells are about 85 to 110 m wide, so look this many cells out to cover the whole gap
+    span = range(-reach, reach + 1)
     for need, t in scored:
         ci, cj = int(t["lat"] / 0.001), int(t["lon"] / 0.001)
         if any(haversine_m(t["lat"], t["lon"], o["lat"], o["lon"]) < min_sep_m
-               for di in (-1, 0, 1) for dj in (-1, 0, 1) for o in cells.get((ci + di, cj + dj), [])):
+               for di in span for dj in span for o in cells.get((ci + di, cj + dj), [])):
             continue
         cells.setdefault((ci, cj), []).append(t)
         chosen.append((t, need))
