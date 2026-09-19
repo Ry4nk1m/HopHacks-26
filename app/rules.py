@@ -2,8 +2,10 @@
 
 FLAG_TYPES = {
     # points: base reward; radius_m: arrival radius before the accuracy allowance
-    "tree_water": {"points": 12, "radius_m": 35, "purpose": "complete", "cooldown_days": 5},
-    "drain_clear": {"points": 15, "radius_m": 30, "purpose": "complete", "cooldown_days": 3},
+    # before_after: whether the task is a physical fix worth a before/after comparison (watering, clearing a
+    # drain) as opposed to just checking a space's current status, where a "before" photo has nothing to show
+    "tree_water": {"points": 12, "radius_m": 35, "purpose": "complete", "cooldown_days": 5, "before_after": True},
+    "drain_clear": {"points": 15, "radius_m": 30, "purpose": "complete", "cooldown_days": 3, "before_after": True},
     "cooling_check": {"points": 20, "radius_m": 60, "purpose": "complete", "cooldown_days": 60},
     "flood_report": {"points": 12, "radius_m": 45, "purpose": "confirm", "expire_hours": 12},
     "problem_report": {"points": 10, "radius_m": 45, "purpose": "confirm", "expire_hours": 24 * 7},

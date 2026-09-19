@@ -232,11 +232,12 @@ export function openMissionSheet() {
       el('div', { class: 'actions' }, el('button', { class: 'btn danger', onclick: cancelMission }, t('cancel_mission')), el('button', { class: 'btn', onclick: closeSheet }, t('close'))));
   } else {
     const confirm = flag.purpose === 'confirm';
+    const needsBefore = !confirm && flag.before_after;
     body.push(
       el('p', {}, el('strong', {}, t('m_arrived')), ' · ', t(taskKey(flag))),
       el('div', { class: 'photos' },
-        confirm ? null : photoSlot(t('m_before'), MS.before, async () => { const p = await pickPhoto(); if (p) { MS.before = p; openMissionSheet(); } }),
-        photoSlot(confirm ? t('m_photo_hint_confirm') : t('m_after'), MS.photo, async () => { const p = await pickPhoto(); if (p) { MS.photo = p; openMissionSheet(); } })),
+        needsBefore ? photoSlot(t('m_before'), MS.before, async () => { const p = await pickPhoto(); if (p) { MS.before = p; openMissionSheet(); } }) : null,
+        photoSlot(needsBefore ? t('m_after') : t('m_photo_hint_confirm'), MS.photo, async () => { const p = await pickPhoto(); if (p) { MS.photo = p; openMissionSheet(); } })),
       el('label', { class: 'lbl' }, t('m_real')),
       el('div', { class: 'seg' }, [['yes', 'm_yes'], ['no', 'm_no'], ['unsure', 'm_unsure']].map(([v, k]) =>
         el('button', { 'aria-pressed': String(MS.wasProblem === v), onclick: () => { MS.wasProblem = MS.wasProblem === v ? null : v; openMissionSheet(); } }, t(k)))),
