@@ -12,6 +12,7 @@ export const S = {
   voice: true,
   pos: null, // real GPS fix { lat, lon, acc, ts }
   fake: null, // demo location { lat, lon }
+  follow: false, // keep the map centered on the user
   locState: 'unknown', // unknown | waiting | ok | denied | unavailable
 };
 

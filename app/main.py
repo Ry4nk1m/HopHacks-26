@@ -380,11 +380,12 @@ def create_app(settings: Optional[Settings] = None, validator=None):
     # Submit photo(s) to complete or confirm a mission, rate limited per user.
     @app.post("/api/missions/{mission_id}/submit")
     def submit(mission_id: int, photo: UploadFile = File(...), before: Optional[UploadFile] = File(None), lat: float = Form(...), lon: float = Form(...),
-               accuracy: Optional[float] = Form(None), was_problem: Optional[str] = Form(None), lang: str = Form("en"), user=Depends(current_user)):
+               accuracy: Optional[float] = Form(None), was_problem: Optional[str] = Form(None), lang: str = Form("en"), note: Optional[str] = Form(None),
+               user=Depends(current_user)):
         limit(("submit", user["id"]), 8, 600)
         data = read_upload(photo)
         before_data = read_upload(before) if before is not None else None
-        result = missions.submit(settings, validator, user["id"], mission_id, data, before_data or None, lat, lon, accuracy, was_problem, lang)
+        result = missions.submit(settings, validator, user["id"], mission_id, data, before_data or None, lat, lon, accuracy, was_problem, lang, note=note)
         if result.get("outcome") in ("verified", "pending"):
             sync(force=True)
         if result.get("outcome") in ("verified", "pending", "rejected"):

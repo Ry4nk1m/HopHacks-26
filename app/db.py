@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS missions (
     lat REAL, lon REAL, accuracy REAL, distance_m REAL, manual_arrival INTEGER NOT NULL DEFAULT 0,
     photo_path TEXT, before_path TEXT, photo_hash TEXT, photo_ahash TEXT,
     verdict TEXT, points INTEGER NOT NULL DEFAULT 0, was_problem TEXT,
-    review_note TEXT
+    review_note TEXT, note TEXT
 );
 CREATE TABLE IF NOT EXISTS confirmations (
     flag_id INTEGER NOT NULL, user_id INTEGER NOT NULL, created_at TEXT NOT NULL,
@@ -101,6 +101,12 @@ def new_id():
     return uuid.uuid4().hex[:12]
 
 
+def _ensure_column(conn, table, column, decl):
+    """Add a column to a table made by an older version of the schema."""
+    if column not in {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
 # Open a database connection, creating the schema on first use.
 # Commits on success, rolls back on error, and always closes the connection.
 @contextmanager
@@ -112,6 +118,7 @@ def connect(db_path):
         if db_path not in _initialised:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(SCHEMA)
+            _ensure_column(conn, "missions", "note", "TEXT")
             conn.commit()
             _initialised.add(db_path)
     conn.execute("PRAGMA busy_timeout=30000")

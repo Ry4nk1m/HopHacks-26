@@ -4,7 +4,7 @@ import { S } from './state.js';
 import { emit, on } from './bus.js';
 import { api } from './api.js';
 import { el, icon, TYPE_ICON, TYPE_COLOR, TYPE_GLYPH, toast, openSheet, closeSheet, sheetOpts, fmtDist, timeAgo, dateShort, cToF } from './ui.js';
-import { t, flagTitle, codeMessage } from './i18n.js';
+import { t, has, flagTitle, codeMessage } from './i18n.js';
 import { getPos, freshPos, haversine } from './geo.js';
 import { speak, stopVoice } from './voice.js';
 
@@ -134,11 +134,11 @@ async function quickConfirm(flag) {
 
 // ------------------------------------------------------------------ mission
 // Local state for the in-progress mission UI: photos taken, submission status, and the last result.
-const MS = { id: null, photo: null, before: null, wasProblem: null, busy: false, result: null, resultFlag: null, arriving: false, lastAuto: 0 };
+const MS = { id: null, photo: null, before: null, note: '', wasProblem: null, busy: false, result: null, resultFlag: null, arriving: false, lastAuto: 0 };
 
 // Reset the mission UI state for a new (or restored) mission.
 function resetMissionState(id) {
-  Object.assign(MS, { id, photo: null, before: null, wasProblem: null, busy: false, result: null, resultFlag: null, arriving: false, lastAuto: 0 });
+  Object.assign(MS, { id, photo: null, before: null, note: '', wasProblem: null, busy: false, result: null, resultFlag: null, arriving: false, lastAuto: 0 });
 }
 
 // Accept a flag as a new mission and open the mission sheet.
@@ -240,12 +240,22 @@ export function openMissionSheet() {
       el('label', { class: 'lbl' }, t('m_real')),
       el('div', { class: 'seg' }, [['yes', 'm_yes'], ['no', 'm_no'], ['unsure', 'm_unsure']].map(([v, k]) =>
         el('button', { 'aria-pressed': String(MS.wasProblem === v), onclick: () => { MS.wasProblem = MS.wasProblem === v ? null : v; openMissionSheet(); } }, t(k)))),
+      el('label', { class: 'lbl' }, t('m_note_label')),
+      noteBox(flag),
       S.cfg.validator === 'mock' ? el('p', { class: 'muted small' }, t('m_sim')) : null,
       el('div', { class: 'actions' },
         el('button', { class: 'btn primary', onclick: submitMission, disabled: !MS.photo }, t('m_submit')),
         el('button', { class: 'btn danger', onclick: cancelMission }, t('cancel_mission'))));
   }
   openSheet(...body, sheetOpts({ dismissible: !MS.busy }));
+}
+
+// A short optional note for anything the photo cannot show. It stays as you type and survives the sheet redrawing when a photo is added.
+function noteBox(flag) {
+  const key = `m_note_ph_${flag.type}`;
+  const box = el('textarea', { class: 'field', rows: '2', maxlength: '200', placeholder: has(key) ? t(key) : t('m_note_ph'), oninput: (e) => { MS.note = e.target.value; } });
+  box.value = MS.note;
+  return box;
 }
 
 // Text telling the user how far they still need to walk to reach the flag.
@@ -320,6 +330,7 @@ async function submitMission() {
   if (MS.before) form.append('before', MS.before.blob, 'before.jpg');
   form.append('lat', pos.lat); form.append('lon', pos.lon); form.append('accuracy', Math.round(pos.acc || 0));
   if (MS.wasProblem) form.append('was_problem', MS.wasProblem);
+  if (MS.note.trim()) form.append('note', MS.note.trim());
   try {
     const r = await api(`/api/missions/${mission.id}/submit`, { method: 'POST', form });
     MS.busy = false;

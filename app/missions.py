@@ -2,6 +2,7 @@
 # A mission is a user's attempt to complete or confirm a flag (a reported issue on the map).
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 from . import db, features, photos, rules, users
@@ -142,6 +143,11 @@ def decide(verdict, purpose, manual_arrival):
     return "rejected", "low_confidence"
 
 
+# Squash extra whitespace and cut a volunteer's note down to 200 characters.
+def clean_note(note):
+    return re.sub(r"\s+", " ", (note or "")).strip()[:200]
+
+
 def _finished_by_someone_else(flag, mission):
     """A task you complete was resolved by another volunteer after you accepted it, so there is nothing left to credit."""
     if rules.FLAG_TYPES[flag["type"]]["purpose"] != "complete":
@@ -163,7 +169,7 @@ def _result(outcome, code, verdict=None, mission=None, flag=None, **extra):
 
 
 # Handle a photo submission for a mission: check it, run it past the validator, then save the result.
-def submit(settings, validator, user_id, mission_id, photo_bytes, before_bytes, lat, lon, accuracy, was_problem, lang, now=None):
+def submit(settings, validator, user_id, mission_id, photo_bytes, before_bytes, lat, lon, accuracy, was_problem, lang, now=None, note=None):
     now = now or datetime.now(timezone.utc)
     db_path = settings.data_dir / "app.db"
     lang = lang if lang in rules.LANGS else "en"
@@ -208,7 +214,7 @@ def submit(settings, validator, user_id, mission_id, photo_bytes, before_bytes, 
             return _result("rejected", "duplicate_photo", mission=mission_to_dict(row))
         purpose = cfg["purpose"]
         vctx = json.loads(flag["context"] or "{}")
-        vctx = {"category": (vctx.get("city") or {}).get("category") or (vctx.get("report") or {}).get("category")}
+        vctx = {"category": (vctx.get("city") or {}).get("category") or (vctx.get("report") or {}).get("category"), "note": clean_note(note)}
         flag_type, manual = flag["type"], bool(m["manual_arrival"])
 
     # phase 2: the model (no database connection held while we wait)
@@ -235,9 +241,9 @@ def submit(settings, validator, user_id, mission_id, photo_bytes, before_bytes, 
             recheck = rules.unusable_recheck_days(verdict.reopen_days)
         stamp = _iso(now)
         attempts = m["attempts"] + 1
-        conn.execute("UPDATE missions SET attempts=?, verdict=?, submitted_at=?, was_problem=?, lat=?, lon=?, accuracy=? WHERE id=?",
+        conn.execute("UPDATE missions SET attempts=?, verdict=?, submitted_at=?, was_problem=?, lat=?, lon=?, accuracy=?, note=? WHERE id=?",
                      (attempts, json.dumps(verdict.model_dump()), stamp, was_problem if was_problem in ("yes", "no", "unsure") else None,
-                      lat, lon, accuracy, mission_id))
+                      lat, lon, accuracy, vctx["note"] or None, mission_id))
         if outcome == "rejected":
             if attempts >= rules.MAX_ATTEMPTS:
                 conn.execute("UPDATE missions SET status='rejected' WHERE id=?", (mission_id,))
@@ -320,7 +326,7 @@ def pending_reviews(conn):
         d = dict(r)
         out.append({"id": d["id"], "flag_id": d["flag_id"], "flag_type": d["flag_type"], "nickname": d["nickname"],
                     "submitted_at": d["submitted_at"], "verdict": json.loads(d["verdict"]) if d["verdict"] else None,
-                    "has_before": bool(d["before_path"]), "distance_m": d["distance_m"], "manual_arrival": bool(d["manual_arrival"])})
+                    "has_before": bool(d["before_path"]), "note": d["note"], "distance_m": d["distance_m"], "manual_arrival": bool(d["manual_arrival"])})
     return out
 
 

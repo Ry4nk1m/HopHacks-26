@@ -210,6 +210,8 @@ export function initMap(cfg) {
       map.setStyle(RASTER_FALLBACK);
     }
   });
+  // dragging the map yourself means you want to look around, so following stops
+  map.on('dragstart', (e) => { if (e.originalEvent) emit('map:userpan'); });
   map.on('click', 'flag-points', (e) => { if (e.features && e.features[0]) emit('flag:select', Number(e.features[0].properties.id)); });
   map.on('click', 'clusters', async (e) => {
     const f = map.queryRenderedFeatures(e.point, { layers: ['clusters'] })[0];
@@ -290,6 +292,13 @@ export function flyTo(lat, lon, zoom) {
 // Instantly move the map to a point, with no animation.
 export function jumpTo(lat, lon, zoom) {
   if (map) map.jumpTo({ center: [lon, lat], zoom: zoom || map.getZoom() });
+}
+
+// Glide the map so the given point is at the center, keeping the current zoom (or zooming in to at least minZoom).
+export function followUser(lat, lon, minZoom) {
+  if (!map || !ready) return;
+  const zoom = minZoom ? Math.max(map.getZoom(), minZoom) : map.getZoom();
+  map.easeTo({ center: [lon, lat], zoom, duration: 700, easing: (x) => x, essential: true });
 }
 
 // Fly the map to the user's current position, if known.

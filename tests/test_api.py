@@ -651,3 +651,47 @@ def test_admin_approval_does_not_double_pay(env):
         c.execute("UPDATE flags SET status='resolved', resolved_at=? WHERE id=?", (datetime.now(timezone.utc).isoformat(), f["id"]))
     r = env.client.post(f"/api/admin/review/{ma}", headers={"X-Admin-Key": "adm-key"}, json={"approve": True}).json()
     assert r == {"status": "rejected", "code": "already_done"} and me(env, a)["points"] == 0
+
+
+# A note on a mission photo is cleaned, sent to the checker, stored, and shown to a human reviewer.
+def test_mission_note_is_passed_stored_and_shown_to_reviewers(env):
+    u = signup(env)
+    f = flag(env, "cooling_check", user=u)
+    mid = start(env, u, f)
+    long = "Closed for the day.   Hours are posted\non the door. " + "x" * 300
+    r = env.client.post(f"/api/missions/{mid}/submit", headers=H(u), files={"photo": ("p.jpg", photo_bytes(91), "image/jpeg")},
+                        data={"lat": f["lat"], "lon": f["lon"], "accuracy": 10, "note": long}).json()
+    assert r["outcome"] == "verified"
+    sent = env.v.calls[-1]["ctx"]["note"]
+    assert sent.startswith("Closed for the day. Hours are posted on the door.") and len(sent) == 200 and "\n" not in sent
+    with db.connect(env.path) as c:
+        assert c.execute("SELECT note FROM missions WHERE id=?", (mid,)).fetchone()["note"] == sent
+
+    env.v.set(confidence=0.5)   # a middling photo goes to a person, who sees the volunteer's note
+    g = flag(env, "drain_clear", "311", user=u)
+    m2 = start(env, u, g)
+    assert env.client.post(f"/api/missions/{m2}/submit", headers=H(u), files={"photo": ("p.jpg", photo_bytes(92), "image/jpeg")},
+                           data={"lat": g["lat"], "lon": g["lon"], "accuracy": 10, "note": "Grate was full of leaves"}).json()["outcome"] == "pending"
+    pending = env.client.get("/api/admin/review", headers={"X-Admin-Key": "adm-key"}).json()["pending"]
+    assert [p["note"] for p in pending] == ["Grate was full of leaves"]
+
+
+# No note is fine: nothing extra is sent and nothing is stored.
+def test_mission_without_a_note_sends_none(env):
+    u = signup(env)
+    f = flag(env, "cooling_check", user=u)
+    assert submit(env, u, start(env, u, f), f["lat"], f["lon"], seed=93).json()["outcome"] == "verified"
+    assert env.v.calls[-1]["ctx"]["note"] == ""
+    with db.connect(env.path) as c:
+        assert c.execute("SELECT note FROM missions").fetchone()["note"] is None
+
+
+# Databases made before notes existed get the new column when the app starts.
+def test_old_database_gains_the_note_column(tmp_path):
+    import sqlite3
+    old = tmp_path / "old.db"
+    con = sqlite3.connect(old)
+    con.execute("CREATE TABLE missions (id INTEGER PRIMARY KEY, flag_id INTEGER, user_id INTEGER, status TEXT, review_note TEXT)")
+    con.commit(); con.close()
+    with db.connect(old) as c:
+        assert "note" in {r[1] for r in c.execute("PRAGMA table_info(missions)")}

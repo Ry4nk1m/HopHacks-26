@@ -48,6 +48,7 @@
       return el('div', { class: 'card' },
         el('strong', {}, `#${p.id} · ${p.flag_type} · ${p.nickname}`),
         el('div', {}, `Confidence ${v.confidence} · subject ${v.subject_ok} · task done ${v.task_done} · ${p.manual_arrival ? 'manual arrival' : 'auto arrival'} · ${p.distance_m ?? '?'} m from the spot`),
+        p.note ? el('div', {}, `Volunteer note: ${p.note}`) : null,
         el('code', {}, v.reasoning || ''),
         photo('after'), p.has_before ? photo('before') : null,
         el('div', { class: 'row' }, el('button', { class: 'ok', onclick: () => decide(true) }, 'Approve'), el('button', { class: 'no', onclick: () => decide(false) }, 'Reject')));

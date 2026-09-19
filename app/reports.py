@@ -9,16 +9,11 @@ from datetime import datetime, timedelta, timezone
 from . import db, photos, rules, users
 from .flags import get_flag
 from .geo import haversine_m, in_bbox, valid_coord
-from .missions import MissionError, _allowance, award_reporter_if_due
+from .missions import MissionError, _allowance, award_reporter_if_due, clean_note as _clean_note
 from .validation import ValidatorUnavailable
 
 # Display titles shown for each auto-detected report type.
 TITLES = {"flood_report": "Reported flooding", "problem_report": "Reported problem"}
-
-
-# Squash extra whitespace and cut the note down to 200 characters.
-def _clean_note(note):
-    return re.sub(r"\s+", " ", (note or "")).strip()[:200]
 
 
 # Handle a new report submission: validate the input, check the photo with the AI validator,

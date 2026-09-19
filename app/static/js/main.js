@@ -6,7 +6,7 @@ import { api, token, ApiError } from './api.js';
 import { el, icon, toast, closeSheet, fmtDist, cToF, setKids, TYPE_ICON, TYPE_COLOR, TYPE_GLYPH } from './ui.js';
 import { t, flagTitle, codeMessage } from './i18n.js';
 import { startLocation, getPos, haversine, setFake, DEMO_SPOT } from './geo.js';
-import { initMap, pushFlags, pushUser, pushMission, setOverlay, flyTo, flyToUser, setSelected } from './mapview.js';
+import { initMap, pushFlags, pushUser, pushMission, setOverlay, flyTo, flyToUser, setSelected, followUser } from './mapview.js';
 import { openFlagSheet, openMissionSheet, openReportSheet, restoreMission } from './flows.js';
 import { openProfile, openAbout } from './profile.js';
 import { initDrawer, openDrawer } from './drawer.js';
@@ -167,7 +167,7 @@ function renderGps() {
 // Redraw all HUD pieces.
 function renderHud() {
   if (!hud) return;
-  renderProfilePill(); renderChips(); renderConds(); renderCard(); renderGps(); renderVoiceButton();
+  renderProfilePill(); renderChips(); renderConds(); renderCard(); renderGps(); renderVoiceButton(); renderLocate();
   if (overlayMenuOpen) renderOverlayMenu();
 }
 
@@ -206,10 +206,21 @@ function enableLocation() {
 
 // Handle tapping the locate button: enable location if needed, or fly to the user (or the default center).
 function onLocate() {
+  if (S.follow) { S.follow = false; renderLocate(); toast(t('follow_off'), { ms: 1400 }); return; }
+  S.follow = true;
+  renderLocate();
   if (!S.fake && ['off', 'denied', 'unavailable'].includes(S.locState)) { enableLocation(); return; }
   const p = getPos();
-  if (p) flyToUser();
-  else { const [lat, lon] = S.cfg.center; flyTo(lat, lon, 16); }
+  if (p) { followUser(p.lat, p.lon, 16.5); toast(t('follow_on'), { ms: 1400 }); }
+  else { S.follow = false; renderLocate(); const [lat, lon] = S.cfg.center; flyTo(lat, lon, 16); }
+}
+
+// Show whether the map is following the user on the locate button.
+function renderLocate() {
+  if (!hud) return;
+  hud.locate.classList.toggle('active', S.follow);
+  hud.locate.setAttribute('aria-pressed', String(S.follow));
+  hud.locate.setAttribute('aria-label', S.follow ? t('follow_label_on') : t('follow_label_off'));
 }
 
 // ------------------------------------------------------------------ data
@@ -273,8 +284,10 @@ function wireEvents() {
     pushUser(); pushMission();
     const p = getPos();
     if (p && !centered && (S.fake || inAoi(p))) { centered = true; flyTo(p.lat, p.lon, 17); }
+    else if (p && S.follow) followUser(p.lat, p.lon);
     if (hud) { renderGps(); renderCard(); }
   });
+  on('map:userpan', () => { if (S.follow) { S.follow = false; renderLocate(); } });
   on('flag:select', (id) => openFlagSheet(id));
   on('flag:highlight', (id) => setSelected(id));
   on('flag:focus', async (id) => { await loadFlags(); const f = S.flags.find((x) => x.id === id); if (f) { flyTo(f.lat, f.lon, 18); openFlagSheet(id); } });
