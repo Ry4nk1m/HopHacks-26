@@ -23,7 +23,7 @@ def flag_to_dict(conn, row, user, now, tzname):
         "claimed": active_claim and d["claimed_by"] != uid, "claimed_by_me": active_claim and d["claimed_by"] == uid,
         "mine": bool(uid and d["reporter_id"] == uid), "unconfirmed": d["source"] == "user" and d["verified_count"] == 0 and d["status"] == "open",
         "reward": rules.mission_points(d["type"], d["urgency"], streak + 1 if streak else 1, False),
-        "purpose": cfg["purpose"], "radius_m": cfg["radius_m"],
+        "purpose": cfg["purpose"], "radius_m": cfg["radius_m"], "before_after": cfg.get("before_after", False),
     }
 
 

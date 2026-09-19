@@ -56,7 +56,7 @@ const EN = {
   m_before: 'Before photo (optional, +5 pts)', m_after: 'After photo', m_take: 'Tap to take a photo', m_retake: 'Tap to retake',
   m_real: 'Did this really need attention?', m_yes: 'Yes', m_no: 'No', m_unsure: 'Not sure',
   m_submit: 'Submit for photo check', m_checking: 'Gemini is checking your photo…', m_sim: 'Demo mode: this photo check is simulated.',
-  m_tries: '{n} tries left', m_need_photo: 'Take the after photo first.', m_photo_hint_confirm: 'Photo of the spot',
+  m_tries: '{n} tries left', m_need_photo: 'Take a photo first.', m_photo_hint_confirm: 'Photo of the spot',
   m_gps_waiting: 'Waiting for a location fix…',
   v_verified: 'Verified', v_pending: 'Sent for review', v_rejected: 'Not accepted', v_error: "Couldn't check",
   v_says: 'Photo check', v_retry: 'Try again',
