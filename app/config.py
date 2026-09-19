@@ -47,6 +47,8 @@ class Settings:
     photo_retention_days: int = 14
     max_upload_bytes: int = 12 * 1024 * 1024
     signals_refresh_minutes: int = 30
+    satellite_refresh_days: int = 14
+    satellite_check_hours: float = 6.0
     background_jobs: bool = True
     external_fetch: bool = True
     snapshot_dir: Path = field(default_factory=lambda: ROOT / "app" / "data")
@@ -87,4 +89,5 @@ def load_settings():
         map_style_url=os.environ.get("MAP_STYLE_URL", "https://tiles.openfreemap.org/styles/liberty").strip(),
         aoi=aoi,
         photo_retention_days=int(os.environ.get("PHOTO_RETENTION_DAYS", "14")),
+        satellite_refresh_days=int(os.environ.get("SATELLITE_REFRESH_DAYS", "14")),
     )

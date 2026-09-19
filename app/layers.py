@@ -54,5 +54,3 @@ def bounds_of(grid):
     return [[grid.west, grid.north], [east, grid.north], [east, south], [grid.west, south]]
 
 
-NASA_TRUE_COLOR = ("https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/"
-                   "default/default/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg")

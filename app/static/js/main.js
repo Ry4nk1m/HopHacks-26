@@ -155,12 +155,11 @@ function overlayNote(id) {
   const L = S.cfg.layers;
   if (id === 'ndvi' && L.ndvi) return t('ov_note_ndvi', { dates: L.ndvi.scenes.map((s) => s.date.slice(5)).join(', ') });
   if (id === 'lst' && L.lst) return t('ov_note_lst', { dates: L.lst.scenes.map((s) => s.date.slice(5)).join(', ') });
-  if (id === 'nasa') return t('ov_note_nasa');
   return '';
 }
 
 function renderOverlayMenu() {
-  const opts = [['off', 'ov_off'], ['ndvi', 'ov_ndvi'], ['lst', 'ov_lst'], ['nasa', 'ov_nasa']];
+  const opts = [['off', 'ov_off'], ['ndvi', 'ov_ndvi'], ['lst', 'ov_lst']];
   setKids(hud.menu,
     ...opts.map(([id, key]) => el('button', { 'aria-pressed': String(S.overlay === id), onclick: () => { setOverlay(id); renderOverlayMenu(); } }, t(key))),
     S.overlay === 'ndvi' ? [el('div', { class: 'ramp ndvi' }), el('div', { class: 'ramp-labels' }, el('span', {}, t('ov_low_green')), el('span', {}, t('ov_high_green')))] : null,

@@ -6,3 +6,4 @@ pydantic>=2.6,<3
 numpy>=1.26,<2.1
 opencv-python-headless>=4.9,<4.12
 tzdata>=2024.1
+rasterio>=1.3

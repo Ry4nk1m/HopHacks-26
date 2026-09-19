@@ -18,12 +18,23 @@ export const store = {
   del(k) { try { localStorage.removeItem(k); } catch (e) { /* storage unavailable */ } },
 };
 
+// 311 and user reports are sorted by what they are about, so a fallen tree shows under Trees and a damaged inlet under Drains
+const TREE_CATS = new Set(['fallen_tree', 'broken_branch', 'tree_issue']);
+const DRAIN_CATS = new Set(['damaged_inlet', 'blocked_drain', 'storm_inlet_choke']);
+const isReport = (f) => f.type === 'flood_report' || f.type === 'problem_report';
+function reportCategory(f) {
+  const c = f.context || {};
+  return (c.city && c.city.category) || (c.report && c.report.category) || null;
+}
+const isTreeReport = (f) => f.type === 'problem_report' && TREE_CATS.has(reportCategory(f));
+const isDrainReport = (f) => f.type === 'problem_report' && DRAIN_CATS.has(reportCategory(f));
+
 const FILTERS = {
   all: () => true,
-  tree: (f) => f.type === 'tree_water',
-  drain: (f) => f.type === 'drain_clear',
+  tree: (f) => f.type === 'tree_water' || isTreeReport(f),
+  drain: (f) => f.type === 'drain_clear' || isDrainReport(f),
   cooling: (f) => f.type === 'cooling_check',
-  reports: (f) => f.type === 'flood_report' || f.type === 'problem_report',
+  reports: (f) => isReport(f) && !isTreeReport(f) && !isDrainReport(f),
 };
 
 export function visibleFlags() {

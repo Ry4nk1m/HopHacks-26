@@ -112,3 +112,11 @@ eval/           accuracy and satellite-value measurements
 tests/          69 tests
 deploy/         docker-compose and Caddy for a small server
 ```
+
+## Satellite refresh
+
+The app ships with a satellite snapshot (`app/data/satellite.json`). While running, it checks every 6 hours and, once the snapshot is
+14 days old, rebuilds it from the newest low-cloud Sentinel-2 and Landsat scenes on Microsoft Planetary Computer. The build runs in a
+separate process (about 15 seconds, under 100 MB), is checked before it replaces the old snapshot, and the old one keeps serving if anything
+fails. The new file lives in the data directory, so on a host with temporary storage it is lost on redeploy and the bundled snapshot is used
+again until the next refresh. Set `SATELLITE_REFRESH_DAYS=0` to turn this off. In dev mode, `POST /api/dev/satellite` runs it now.

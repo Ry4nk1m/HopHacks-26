@@ -1,4 +1,2 @@
-# only needed to rebuild the bundled satellite snapshot (scripts/build_satellite.py)
+# everything the satellite build needs is in requirements.txt now (the app refreshes its own snapshot)
 -r requirements.txt
-rasterio>=1.3
-requests>=2.31

@@ -493,3 +493,79 @@ def test_eval_satellite_terciles():
     conn.executescript("CREATE TABLE missions (flag_id, status, was_problem); CREATE TABLE flags (id, type, context);"
                        "INSERT INTO flags VALUES (1, 'tree_water', '{\"need\": 0.8}'); INSERT INTO missions VALUES (1, 'verified', 'yes'), (1, 'rejected', 'no');")
     assert collect(conn) == [(0.8, "yes", "tree_water")]
+
+
+# ---------------------------------------------------------------- automatic satellite refresh
+def _write_snapshot(path, when, aoi, ndvi_fill=0.4, rows=6, cols=8, empty=False):
+    grid = [[None if empty else ndvi_fill] * cols for _ in range(rows)]
+    lst = [[None if empty else 30.0] * cols for _ in range(rows)]
+    meta = {"generated_at": when.isoformat(timespec="seconds"), "aoi": list(aoi), "res_deg": 0.0003, "rows": rows, "cols": cols,
+            "ndvi": {"source": "s2", "scenes": [{"id": "a", "date": "2026-09-01", "cloud": 1}]},
+            "lst": {"source": "l9", "scenes": [{"id": "b", "date": "2026-09-01", "cloud": 1}]}}
+    path.write_text(json.dumps({"meta": meta, "ndvi": grid, "lst_c": lst}))
+
+
+def test_satellite_is_due_after_two_weeks(settings, tmp_path):
+    from app import satellite as sat
+    _write_snapshot(tmp_path / "a.json", NOW - timedelta(days=13), settings.aoi)
+    _write_snapshot(tmp_path / "b.json", NOW - timedelta(days=14), settings.aoi)
+    fresh, stale = SatelliteGrid.load(tmp_path / "a.json"), SatelliteGrid.load(tmp_path / "b.json")
+    assert not sat.is_due(fresh, 14, NOW) and sat.is_due(stale, 14, NOW)
+    assert sat.is_due(None, 14, NOW)
+    assert not sat.is_due(stale, 0, NOW)  # 0 switches automatic refresh off
+
+
+def test_satellite_load_best_prefers_newer_snapshot(settings, tmp_path):
+    from app import satellite as sat
+    bundled, live = tmp_path / "bundled", tmp_path / "live"
+    bundled.mkdir(); live.mkdir()
+    _write_snapshot(bundled / "satellite.json", NOW - timedelta(days=20), settings.aoi, ndvi_fill=0.1)
+    assert sat.load_best(bundled, live).meta["generated_at"].startswith("2026-08-30")
+    _write_snapshot(live / "satellite.json", NOW - timedelta(days=1), settings.aoi, ndvi_fill=0.9)
+    assert sat.load_best(bundled, live).meta["generated_at"].startswith("2026-09-18")
+    (live / "satellite.json").write_text("{ not json")  # a corrupt live file must not take the app down
+    assert sat.load_best(bundled, live).meta["generated_at"].startswith("2026-08-30")
+    assert sat.load_best(tmp_path / "none", tmp_path / "none2") is None
+
+
+def test_satellite_refresh_swaps_only_after_checks_pass(settings, tmp_path):
+    from app import satellite as sat
+    old_when = datetime.now(timezone.utc) - timedelta(days=30)
+    _write_snapshot(tmp_path / "satellite.json", old_when, settings.aoi, ndvi_fill=0.2)
+    previous = SatelliteGrid.load(tmp_path / "satellite.json")
+
+    def good(out):
+        _write_snapshot(out, datetime.now(timezone.utc), settings.aoi, ndvi_fill=0.7)
+    new = sat.refresh(settings, previous, build=good)
+    assert new.ndvi[0][0] == pytest.approx(0.7) and SatelliteGrid.load(tmp_path / "satellite.json").ndvi[0][0] == pytest.approx(0.7)
+    assert not list(tmp_path.glob("*.new"))
+
+    for label, bad in (("empty", lambda out: _write_snapshot(out, datetime.now(timezone.utc), settings.aoi, empty=True)),
+                       ("other area", lambda out: _write_snapshot(out, datetime.now(timezone.utc), (-77, 38, -76.9, 38.1))),
+                       ("resized", lambda out: _write_snapshot(out, datetime.now(timezone.utc), settings.aoi, rows=3, cols=3)),
+                       ("crash", lambda out: (_ for _ in ()).throw(RuntimeError("planetary computer down")))):
+        with pytest.raises((ValueError, RuntimeError)):
+            sat.refresh(settings, new, build=bad)
+        assert SatelliteGrid.load(tmp_path / "satellite.json").ndvi[0][0] == pytest.approx(0.7), label  # live file untouched
+        assert not list(tmp_path.glob("*.new")), label
+
+
+def test_dev_satellite_refresh_endpoint_and_failure_is_recorded(settings, tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import satellite as sat
+    from app.main import create_app
+    import time as _t
+
+    def boom(out):
+        raise RuntimeError("no scenes")
+    monkeypatch.setattr(sat, "run_build", boom)
+    monkeypatch.setattr(sat, "refresh", lambda st, previous=None, build=None: (_ for _ in ()).throw(RuntimeError("no scenes")))
+    client = TestClient(create_app(settings))
+    assert client.post("/api/dev/satellite").json() == {"started": True}
+    for _ in range(50):
+        state = client.get("/api/dev/state").json()["satellite"]
+        if state["state"] != "running":
+            break
+        _t.sleep(0.1)
+    assert state["state"] == "failed" and "no scenes" in state["error"] and state["snapshot"]  # old snapshot keeps serving
+    assert client.get("/api/config").json()["layers"]["ndvi"]["scenes"]

@@ -1,8 +1,15 @@
 import json
+import logging
 import math
+import os
+import subprocess
+import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
+
+log = logging.getLogger("parasol.satellite")
 
 
 class SatelliteGrid:
@@ -65,3 +72,75 @@ class SatelliteGrid:
         if not s or s["veg_low_pct"] is None or s["heat_pct"] is None:
             return None
         return round(0.5 * s["veg_low_pct"] + 0.5 * s["heat_pct"], 3)
+
+
+LIVE_NAME = "satellite.json"
+MIN_VALID_FRACTION = 0.4
+
+
+def generated_at(grid):
+    try:
+        return datetime.fromisoformat(grid.meta["generated_at"])
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
+def load_best(snapshot_dir, data_dir):
+    """The newest usable snapshot: one the app built itself in the data dir, else the one bundled with the code."""
+    candidates = []
+    for path in (Path(data_dir) / LIVE_NAME, Path(snapshot_dir) / LIVE_NAME):
+        try:
+            grid = SatelliteGrid.load(path)
+        except (OSError, ValueError, KeyError):
+            log.warning("ignoring unreadable satellite snapshot %s", path)
+            continue
+        if grid is not None:
+            candidates.append(grid)
+    return max(candidates, key=lambda g: generated_at(g) or datetime.min.replace(tzinfo=timezone.utc), default=None)
+
+
+def is_due(grid, days, now=None):
+    """True when the snapshot is older than `days`. days <= 0 turns automatic refresh off."""
+    if days <= 0:
+        return False
+    if grid is None:
+        return True
+    made = generated_at(grid)
+    return made is None or (now or datetime.now(timezone.utc)) - made >= timedelta(days=days)
+
+
+def check_new_snapshot(path, aoi, previous=None):
+    """Load a freshly built snapshot and refuse it unless it covers the right area and has enough real data."""
+    grid = SatelliteGrid.load(path)
+    if grid is None:
+        raise ValueError("snapshot file missing")
+    if [round(v, 5) for v in grid.meta["aoi"]] != [round(v, 5) for v in aoi]:
+        raise ValueError("snapshot covers a different area")
+    for name, arr in (("vegetation", grid.ndvi), ("heat", grid.lst)):
+        if np.isfinite(arr).mean() < MIN_VALID_FRACTION:
+            raise ValueError(f"{name} layer is mostly empty")
+    if previous is not None and (grid.rows, grid.cols) != (previous.rows, previous.cols):
+        raise ValueError("snapshot grid size changed")
+    return grid
+
+
+def run_build(out_path, timeout=900):
+    """Run the builder in its own process so its memory is returned to the system as soon as it finishes."""
+    root = Path(__file__).resolve().parent.parent
+    proc = subprocess.run([sys.executable, "-W", "ignore", "-m", "app.satellite_build", "--out", str(out_path)],
+                          cwd=root, capture_output=True, text=True, timeout=timeout)
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout or "build failed").strip().splitlines()[-1][:300])
+
+
+def refresh(settings, previous=None, build=run_build):
+    """Build a new snapshot into the data dir. The live file is replaced only after the new one passes checks."""
+    live = Path(settings.data_dir) / LIVE_NAME
+    tmp = live.with_suffix(".json.new")
+    try:
+        build(tmp)
+        grid = check_new_snapshot(tmp, settings.aoi, previous)
+        os.replace(tmp, live)
+        return grid
+    finally:
+        tmp.unlink(missing_ok=True)

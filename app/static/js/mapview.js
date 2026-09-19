@@ -72,10 +72,6 @@ function addOverlays() {
       if (!map.getLayer(`ov-${name}`)) map.addLayer({ id: `ov-${name}`, type: 'raster', source: `ov-${name}`, layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.85, 'raster-fade-duration': 0 } });
     });
   }
-  if (L.nasa_true_color) {
-    if (!map.getSource('ov-nasa')) map.addSource('ov-nasa', { type: 'raster', tiles: [L.nasa_true_color], tileSize: 256, maxzoom: 9, attribution: 'NASA GIBS / MODIS' });
-    if (!map.getLayer('ov-nasa')) map.addLayer({ id: 'ov-nasa', type: 'raster', source: 'ov-nasa', layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.9 } });
-  }
 }
 
 function addFlagLayers() {
@@ -251,7 +247,7 @@ export function pushMission() {
 export function setOverlay(name) {
   S.overlay = name;
   if (!ready) return;
-  ['ndvi', 'lst', 'nasa'].forEach((n) => {
+  ['ndvi', 'lst'].forEach((n) => {
     if (map.getLayer(`ov-${n}`)) map.setLayoutProperty(`ov-${n}`, 'visibility', n === name ? 'visible' : 'none');
   });
 }

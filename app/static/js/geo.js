@@ -64,12 +64,18 @@ export function startLocation() {
   watchId = navigator.geolocation.watchPosition(onFix, onError, { enableHighAccuracy: true, maximumAge: 3000, timeout: 20000 });
 }
 
+// GeolocationPositionError codes: 1 denied, 2 unavailable, 3 timed out
+function locationError(e) {
+  const code = e && e.code === 1 ? 'loc_denied' : e && e.code === 3 ? 'loc_timeout' : 'loc_unavailable';
+  return Object.assign(new Error(code), { code });
+}
+
 /** A position fresh enough to act on (used when arriving, submitting or confirming). */
 export function freshPos() {
   if (S.fake) return Promise.resolve(getPos());
   if (S.pos && Date.now() - S.pos.ts < 20000) return Promise.resolve(S.pos);
   return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) { reject(new Error('unavailable')); return; }
-    navigator.geolocation.getCurrentPosition((p) => { onFix(p); resolve(S.pos); }, (e) => reject(e), { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 });
+    if (!navigator.geolocation) { reject(locationError(null)); return; }
+    navigator.geolocation.getCurrentPosition((p) => { onFix(p); resolve(S.pos); }, (e) => reject(locationError(e)), { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 });
   });
 }

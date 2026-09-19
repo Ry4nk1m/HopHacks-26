@@ -284,7 +284,7 @@ async function submitMission() {
   const { mission } = S.mission, flag = missionFlag();
   MS.busy = true; openMissionSheet();
   let pos;
-  try { pos = await freshPos(); } catch (e) { MS.busy = false; openMissionSheet(); toast(codeMessage('bad_location')); return; }
+  try { pos = await freshPos(); } catch (e) { MS.busy = false; openMissionSheet(); toast(codeMessage(e && e.code ? e.code : 'bad_location')); return; }
   const form = new FormData();
   form.append('photo', MS.photo.blob, 'photo.jpg');
   if (MS.before) form.append('before', MS.before.blob, 'before.jpg');
@@ -339,6 +339,7 @@ function renderResult() {
 }
 
 // ------------------------------------------------------------------ report a problem
+// the server works out flood vs other from the photo, so the reporter doesn't choose
 const RS = { type: 'problem_report', photo: null, note: '', busy: false, result: null };
 
 export function openReportSheet() {
@@ -370,9 +371,7 @@ function renderReport() {
   note.value = RS.note;
   openSheet(
     el('h2', {}, t('rep_title')),
-    el('label', { class: 'lbl' }, t('rep_type')),
-    el('div', { class: 'seg' }, [['flood_report', 'rep_flood'], ['problem_report', 'rep_other']].map(([v, k]) =>
-      el('button', { 'aria-pressed': String(RS.type === v), onclick: () => { RS.type = v; renderReport(); } }, t(k)))),
+    el('p', { class: 'muted' }, t('rep_help')),
     el('label', { class: 'lbl' }, t('rep_photo')),
     el('div', { class: 'photos' }, photoSlot(t('m_take'), RS.photo, async () => { const ph = await pickPhoto(); if (ph) { RS.photo = ph; renderReport(); } })),
     note,

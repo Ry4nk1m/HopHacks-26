@@ -36,7 +36,7 @@ def create_report(settings, validator, user_id, photo_bytes, claimed_type, note,
         return {"outcome": "rejected", "code": exc.code, "retry": True}
 
     with db.connect(db_path) as conn:
-        for r in conn.execute("SELECT id, lat, lon FROM flags WHERE type=? AND status IN ('open','pending')", (claimed_type,)):
+        for r in conn.execute("SELECT id, lat, lon FROM flags WHERE type IN (?, ?) AND status IN ('open','pending')", rules.REPORT_TYPES):
             if haversine_m(lat, lon, r["lat"], r["lon"]) <= rules.REPORT_DEDUPE_M:
                 return {"outcome": "duplicate", "code": "duplicate_report", "flag_id": r["id"], "retry": False}
         if photos.find_duplicate(conn, photo, None, user_id):

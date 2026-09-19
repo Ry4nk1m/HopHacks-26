@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from . import db, features, flags as flagmod, layers, missions, photos, reports, rules, signals, triggers, users
 from .config import APP_NAME, SITE_NAME, Settings, load_settings
 from .ratelimit import RateLimiter
-from .satellite import SatelliteGrid
+from . import satellite as satmod
 from .tts import TTSUnavailable, synthesize
 from .validation import make_validator
 
@@ -60,10 +60,12 @@ def create_app(settings: Optional[Settings] = None, validator=None):
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     db_path = settings.data_dir / "app.db"
     validator = validator or make_validator(settings)
-    satellite = SatelliteGrid.load(settings.snapshot_dir / "satellite.json")
     limiter = RateLimiter()
     sync_lock = threading.Lock()
-    state = {"last_sync": 0.0}
+    sat_lock = threading.Lock()
+    # the satellite grid can be replaced while the app runs (two-week refresh), so it lives in state, not in a local
+    state = {"last_sync": 0.0, "sat": satmod.load_best(settings.snapshot_dir, settings.data_dir),
+             "sat_status": {"state": "idle", "at": None, "error": None}}
     render_cache = {}
 
     def conn():
@@ -74,7 +76,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
             if not force and time.monotonic() - state["last_sync"] < SYNC_STALE_SECONDS:
                 return None
             with conn() as c:
-                result = triggers.sync_flags(c, settings, satellite)
+                result = triggers.sync_flags(c, settings, state["sat"])
             state["last_sync"] = time.monotonic()
             return result
 
@@ -84,6 +86,33 @@ def create_app(settings: Optional[Settings] = None, validator=None):
         status = signals.refresh_signals(settings, db_path)
         sync(force=True)
         return status
+
+    def refresh_satellite(force=False):
+        """Rebuild the satellite snapshot when it is older than the refresh interval (or on demand). Never raises."""
+        if not sat_lock.acquire(blocking=False):
+            return "busy"
+        status = state["sat_status"]
+        try:
+            if not force and not satmod.is_due(state["sat"], settings.satellite_refresh_days):
+                return "not_due"
+            status.update(state="running", error=None)
+            grid = satmod.refresh(settings, previous=state["sat"])
+            state["sat"] = grid
+            render_cache.clear()
+            status.update(state="ok", at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+            sync(force=True)
+            return "refreshed"
+        except Exception as exc:
+            status.update(state="failed", at=datetime.now(timezone.utc).isoformat(timespec="seconds"), error=str(exc)[:300])
+            return "failed"
+        finally:
+            sat_lock.release()
+
+    def satellite_loop():
+        time.sleep(300)
+        while True:
+            refresh_satellite()
+            time.sleep(max(settings.satellite_check_hours, 0.05) * 3600)
 
     def background_loop():
         while True:
@@ -109,6 +138,8 @@ def create_app(settings: Optional[Settings] = None, validator=None):
                 threading.Thread(target=refresh_external, daemon=True).start()
         if settings.background_jobs:
             threading.Thread(target=background_loop, daemon=True).start()
+            if settings.external_fetch and settings.satellite_refresh_days > 0:
+                threading.Thread(target=satellite_loop, daemon=True).start()
         yield
 
     app = FastAPI(title=APP_NAME, docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=lifespan)
@@ -174,6 +205,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
 
     @app.get("/api/config")
     def get_config():
+        satellite = state["sat"]
         meta = satellite.meta if satellite else None
         return {
             "app_name": APP_NAME, "site_name": SITE_NAME, "validator": validator.name, "tts": settings.tts_enabled, "dev_tools": settings.dev_tools,
@@ -187,11 +219,12 @@ def create_app(settings: Optional[Settings] = None, validator=None):
                 "bounds": layers.bounds_of(satellite) if satellite else None,
                 "ndvi": {"scenes": meta["ndvi"]["scenes"], "source": meta["ndvi"]["source"]} if meta else None,
                 "lst": {"scenes": meta["lst"]["scenes"], "source": meta["lst"]["source"]} if meta else None,
-                "nasa_true_color": layers.NASA_TRUE_COLOR, "legends": layers.LEGENDS},
+                "legends": layers.LEGENDS},
         }
 
     @app.get("/api/layers/{name}.png")
     def layer_png(name: str):
+        satellite = state["sat"]
         if satellite is None or name not in ("ndvi", "lst"):
             raise HTTPException(404, detail="not found")
         if name not in render_cache:
@@ -302,7 +335,9 @@ def create_app(settings: Optional[Settings] = None, validator=None):
             cond = signals.conditions(c)
             counts = {r["type"] + ":" + r["status"]: r["c"] for r in c.execute("SELECT type, status, COUNT(*) c FROM flags GROUP BY type, status")}
             return {"conditions": {k: cond[k] for k in ("heat", "rain", "dry", "auto", "forced")}, "flags": counts,
-                    "status": signals.load_signal(c, "status")[0], "validator": validator.name}
+                    "status": signals.load_signal(c, "status")[0], "validator": validator.name,
+                    "satellite": {**state["sat_status"], "snapshot": state["sat"].meta["generated_at"] if state["sat"] else None,
+                                  "refresh_days": settings.satellite_refresh_days}}
 
     @app.post("/api/dev/force", dependencies=[Depends(require_dev)])
     def dev_force(body: ForceIn):
@@ -316,6 +351,13 @@ def create_app(settings: Optional[Settings] = None, validator=None):
     @app.post("/api/dev/refresh", dependencies=[Depends(require_dev)])
     def dev_refresh():
         return {"status": refresh_external(), "sync": sync(force=True)}
+
+    @app.post("/api/dev/satellite", dependencies=[Depends(require_dev)])
+    def dev_satellite():
+        if state["sat_status"]["state"] == "running":
+            return {"started": False, "reason": "already_running"}
+        threading.Thread(target=refresh_satellite, kwargs={"force": True}, daemon=True).start()
+        return {"started": True}
 
     @app.post("/api/dev/reset", dependencies=[Depends(require_dev)])
     def dev_reset():
