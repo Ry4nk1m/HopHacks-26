@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#e39b24">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/icons/icon-180.png">
+<link rel="icon" href="/static/icons/icon-192.png">
+<link rel="preload" as="image" href="/static/umbrella.gif">
+<title>Parasol</title>
+<link rel="stylesheet" href="/static/vendor/maplibre-gl.css">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <div id="map"></div>
+  <div id="hud"></div>
+  <div id="sheetWrap"></div>
+  <div id="toasts"></div>
+  <div id="boot" aria-busy="true" aria-live="polite">
+    <img class="boot-mark" src="/static/umbrella.gif" alt="" width="512" height="512">
+    <p id="bootMsg">Loading map…</p>
+  </div>
+</div>
+<script src="/static/vendor/maplibre-gl.js"></script>
+<script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

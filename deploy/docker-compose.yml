@@ -1,0 +1,25 @@
+# Small always-on server (e.g. a $6 DigitalOcean droplet) with automatic HTTPS and a persistent data volume.
+#   1. point a domain at the droplet, 2. create ../.env, 3. DOMAIN=example.com docker compose up -d --build
+# NOTE: the app image is tested; this file passes `docker compose config`, but Caddy + HTTPS on a real domain has not been run here.
+services:
+  app:
+    build: ..
+    env_file: ../.env
+    environment:
+      DATA_DIR: /srv/data
+    volumes:
+      - data:/srv/data
+    restart: unless-stopped
+  caddy:
+    image: caddy:2
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [app]
+    restart: unless-stopped
+volumes:
+  data: {}
+  caddy_data: {}

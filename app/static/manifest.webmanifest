@@ -1,0 +1,14 @@
+{
+  "name": "Parasol",
+  "short_name": "Parasol",
+  "description": "Small, verified neighborhood tasks guided by satellite data.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#152e34",
+  "theme_color": "#152e34",
+  "icons": [
+    {"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

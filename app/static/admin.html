@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review queue</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.45 system-ui, sans-serif; margin: 0; padding: 16px; max-width: 900px; margin-inline: auto; }
+  h1 { font-size: 1.3rem; }
+  .card { border: 1px solid #8884; border-radius: 12px; padding: 12px; margin: 12px 0; display: grid; gap: 8px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  img { max-width: 100%; max-height: 320px; border-radius: 8px; }
+  button, input { font: inherit; padding: 8px 12px; border-radius: 8px; border: 1px solid #8886; }
+  button.ok { background: #16a34a; color: #fff; border-color: #16a34a; } button.no { background: #dc2626; color: #fff; border-color: #dc2626; }
+  code { font-size: .8rem; word-break: break-word; }
+</style>
+</head>
+<body>
+<h1>Review queue: low-confidence photo checks</h1>
+<div class="row"><input id="key" type="password" placeholder="Admin key" autocomplete="off"><button id="load">Load</button></div>
+<p id="msg"></p>
+<div id="list"></div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const key = () => $('key').value.trim();
+  const hdr = () => ({ 'X-Admin-Key': key(), 'Content-Type': 'application/json' });
+  function el(tag, props, ...kids) {
+    const n = document.createElement(tag);
+    Object.entries(props || {}).forEach(([k, v]) => { if (k === 'class') n.className = v; else if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else if (v != null) n.setAttribute(k, v); });
+    kids.flat().forEach((c) => c != null && n.append(c.nodeType ? c : document.createTextNode(String(c))));
+    return n;
+  }
+  async function load() {
+    $('msg').textContent = '';
+    const r = await fetch('/api/admin/review', { headers: hdr() });
+    if (!r.ok) { $('msg').textContent = r.status === 403 ? 'Wrong or missing admin key.' : 'Could not load.'; $('list').replaceChildren(); return; }
+    const { pending } = await r.json();
+    $('msg').textContent = pending.length ? '' : 'Nothing waiting for review.';
+    $('list').replaceChildren(...pending.map((p) => {
+      const v = p.verdict || {};
+      const photo = (which) => el('img', { src: `/api/admin/photo/${p.id}?which=${which}&key=${encodeURIComponent(key())}`, alt: `${which} photo` });
+      const decide = async (approve) => {
+        const res = await fetch(`/api/admin/review/${p.id}`, { method: 'POST', headers: hdr(), body: JSON.stringify({ approve }) });
+        $('msg').textContent = res.ok ? `Mission ${p.id} ${approve ? 'approved' : 'rejected'}.` : 'Failed.';
+        load();
+      };
+      return el('div', { class: 'card' },
+        el('strong', {}, `#${p.id} · ${p.flag_type} · ${p.nickname}`),
+        el('div', {}, `Confidence ${v.confidence} · subject ${v.subject_ok} · task done ${v.task_done} · ${p.manual_arrival ? 'manual arrival' : 'auto arrival'} · ${p.distance_m ?? '?'} m from the spot`),
+        el('code', {}, v.reasoning || ''),
+        photo('after'), p.has_before ? photo('before') : null,
+        el('div', { class: 'row' }, el('button', { class: 'ok', onclick: () => decide(true) }, 'Approve'), el('button', { class: 'no', onclick: () => decide(false) }, 'Reject')));
+    }));
+  }
+  $('load').addEventListener('click', load);
+</script>
+</body>
+</html>

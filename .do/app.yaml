@@ -1,0 +1,36 @@
+# DigitalOcean App Platform spec. App Platform disks are temporary: data (accounts, missions, photos) resets on every deploy.
+# That is fine for a demo; for real use run the docker-compose setup in deploy/ on a droplet, or add a managed database.
+name: parasol
+region: nyc
+services:
+  - name: web
+    dockerfile_path: Dockerfile
+    source_dir: /
+    github:
+      repo: YOUR-GITHUB-USER/YOUR-REPO
+      branch: main
+      deploy_on_push: true
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+    health_check:
+      http_path: /api/health
+    envs:
+      - key: GEMINI_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: GEMINI_MODEL
+        scope: RUN_TIME
+        value: gemini-3.6-flash
+      - key: ELEVENLABS_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: ELEVENLABS_VOICE_ID
+        scope: RUN_TIME
+        value: 21m00Tcm4TlvDq8ikWAM
+      - key: DEV_TOOLS
+        scope: RUN_TIME
+        value: "1"
+      - key: ADMIN_KEY
+        scope: RUN_TIME
+        type: SECRET
