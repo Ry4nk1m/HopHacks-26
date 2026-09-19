@@ -7,12 +7,12 @@ services:
     dockerfile_path: Dockerfile
     source_dir: /
     github:
-      repo: YOUR-GITHUB-USER/YOUR-REPO
-      branch: main
+      repo: Ry4nk1m/HopHacks-26
+      branch: neighborhood-missions
       deploy_on_push: true
     http_port: 8080
     instance_count: 1
-    instance_size_slug: apps-s-1vcpu-1gb
+    instance_size_slug: apps-s-1vcpu-0.5gb
     health_check:
       http_path: /api/health
     envs:
@@ -27,10 +27,10 @@ services:
         type: SECRET
       - key: ELEVENLABS_VOICE_ID
         scope: RUN_TIME
-        value: 21m00Tcm4TlvDq8ikWAM
+        value: hpp4J3VqNfWAUOO0d1Us
       - key: DEV_TOOLS
         scope: RUN_TIME
-        value: "1"
+        value: "0"
       - key: ADMIN_KEY
         scope: RUN_TIME
         type: SECRET
