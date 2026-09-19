@@ -13,7 +13,13 @@ const ADJ = ['Maple', 'Quiet', 'Bright', 'Brave', 'Sunny', 'Swift', 'Kind', 'Cle
 const NOUN = ['Fox', 'Otter', 'Heron', 'Finch', 'Badger', 'Wren', 'Owl', 'Robin', 'Hare', 'Lynx', 'Sparrow', 'Marten'];
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
 
-const HERO_SRC = '/static/umbrella.gif';
+// static, trusted artwork (an open umbrella with a few flags falling like rain drops of tasks)
+const HERO = `<svg viewBox="0 0 240 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-hidden="true">
+  <path d="M28 108C28 58 68 22 120 22s92 36 92 86c-14-12-28-12-46 0-16-12-30-12-46 0-16-12-30-12-46 0-18-12-32-12-46 0z" fill="#152e34"/>
+  <path d="M120 22v86M120 22C96 44 82 76 74 108M120 22c24 22 38 54 46 86" stroke="#fbefd9" stroke-opacity=".35" stroke-width="3" fill="none"/>
+  <path d="M120 108v54a16 16 0 0 1-32 0" stroke="#152e34" stroke-width="7" stroke-linecap="round" fill="none"/>
+  <circle cx="40" cy="150" r="7" fill="#e46a46"/><circle cx="196" cy="140" r="7" fill="#234831"/><circle cx="176" cy="176" r="5" fill="#152e34" fill-opacity=".55"/>
+</svg>`;
 
 export function showOnboarding(onDone) {
   const old = document.querySelector('.ob');
@@ -22,7 +28,7 @@ export function showOnboarding(onDone) {
   const root = el('div', { class: 'ob' });
   const top = el('div', { class: 'ob-top' });
   const hero = el('div', { class: 'ob-hero' });
-  hero.append(el('img', { class: 'ob-hero-gif', src: HERO_SRC, alt: '', decoding: 'async' }));
+  hero.innerHTML = HERO;
   const card = el('div', { class: 'ob-card' });
   root.append(top, hero, card);
   document.getElementById('app').append(root);
