@@ -1,5 +1,6 @@
 # Main FastAPI app: builds the app, wires up background jobs, and defines all API routes.
 
+import asyncio
 import hmac
 import json
 import threading
@@ -11,11 +12,11 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel, Field
 
-from . import db, features, flags as flagmod, layers, missions, photos, reports, rules, signals, triggers, users
+from . import db, events, features, flags as flagmod, layers, missions, photos, reports, rules, signals, triggers, users
 from .config import APP_NAME, SITE_NAME, Settings, load_settings
 from .ratelimit import RateLimiter
 from . import satellite as satmod
@@ -74,6 +75,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
     limiter = RateLimiter()
     sync_lock = threading.Lock()
     sat_lock = threading.Lock()
+    broadcaster = events.Broadcaster()
     # the satellite grid can be replaced while the app runs (two-week refresh), so it lives in state, not in a local
     state = {"last_sync": 0.0, "sat": satmod.load_best(settings.snapshot_dir, settings.data_dir),
              "sat_status": {"state": "idle", "at": None, "error": None}}
@@ -82,6 +84,10 @@ def create_app(settings: Optional[Settings] = None, validator=None):
     # Open a new database connection.
     def conn():
         return db.connect(db_path)
+
+    # Tell every connected browser to refresh its flags right away, instead of waiting for the next poll.
+    def notify_flags_changed(reason):
+        broadcaster.publish({"type": "flags_changed", "reason": reason})
 
     # Re-check trigger conditions and update flags, but skip if it ran recently (unless forced).
     def sync(force=False):
@@ -99,6 +105,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
             return {}
         status = signals.refresh_signals(settings, db_path)
         sync(force=True)
+        notify_flags_changed("external_refresh")
         return status
 
     def refresh_satellite(force=False):
@@ -115,6 +122,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
             render_cache.clear()
             status.update(state="ok", at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
             sync(force=True)
+            notify_flags_changed("satellite_refresh")
             return "refreshed"
         except Exception as exc:
             status.update(state="failed", at=datetime.now(timezone.utc).isoformat(timespec="seconds"), error=str(exc)[:300])
@@ -142,6 +150,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
     # Runs on app startup and shutdown: loads data, purges old photos, and starts background threads.
     @asynccontextmanager
     async def lifespan(app):
+        broadcaster.bind_loop(asyncio.get_running_loop())
         with conn() as c:
             features.load_snapshot(c, settings)
             photos.purge_old_photos(settings, c)
@@ -310,6 +319,29 @@ def create_app(settings: Optional[Settings] = None, validator=None):
                 raise HTTPException(404, detail={"code": "not_found"})
             return flagmod.flag_to_dict(c, row, user, datetime.now(timezone.utc), settings.timezone)
 
+    # Push notifications: a client keeps this connection open and gets a "flags_changed" message
+    # whenever someone else updates a flag (report, confirm, mission submit, admin review), so the
+    # map can refresh right away instead of waiting for the next poll.
+    @app.get("/api/stream")
+    async def stream(request: Request):
+        q = broadcaster.subscribe()
+
+        async def events_gen():
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        payload = await asyncio.wait_for(q.get(), timeout=20)
+                        yield f"data: {payload}\n\n"
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+            finally:
+                broadcaster.unsubscribe(q)
+
+        return StreamingResponse(events_gen(), media_type="text/event-stream",
+                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
     # Get the points leaderboard.
     @app.get("/api/leaderboard")
     def leaderboard():
@@ -328,6 +360,7 @@ def create_app(settings: Optional[Settings] = None, validator=None):
     def accept_mission(flag_id: int, user=Depends(current_user)):
         with conn() as c:
             m = missions.accept(c, user, flag_id, datetime.now(timezone.utc))
+        notify_flags_changed("accept")
         return {"mission": m}
 
     # Record the user's arrival location for a mission.
@@ -340,7 +373,9 @@ def create_app(settings: Optional[Settings] = None, validator=None):
     @app.post("/api/missions/{mission_id}/cancel")
     def cancel(mission_id: int, user=Depends(current_user)):
         with conn() as c:
-            return {"mission": missions.cancel(c, user, mission_id, datetime.now(timezone.utc))}
+            result = {"mission": missions.cancel(c, user, mission_id, datetime.now(timezone.utc))}
+        notify_flags_changed("cancel")
+        return result
 
     # Submit photo(s) to complete or confirm a mission, rate limited per user.
     @app.post("/api/missions/{mission_id}/submit")
@@ -352,6 +387,8 @@ def create_app(settings: Optional[Settings] = None, validator=None):
         result = missions.submit(settings, validator, user["id"], mission_id, data, before_data or None, lat, lon, accuracy, was_problem, lang)
         if result.get("outcome") in ("verified", "pending"):
             sync(force=True)
+        if result.get("outcome") in ("verified", "pending", "rejected"):
+            notify_flags_changed("submit")
         return result
 
     # Create a new user-reported issue (a report) with a photo, rate limited per user.
@@ -361,13 +398,17 @@ def create_app(settings: Optional[Settings] = None, validator=None):
         limit(("report", user["id"]), 6, 3600)
         data = read_upload(photo)
         result = reports.create_report(settings, validator, user["id"], data, type, note, lat, lon, accuracy, lang)
+        if result.get("outcome") == "created":
+            notify_flags_changed("report")
         return result
 
     # Confirm whether a flag's problem is still present, based on the user's location.
     @app.post("/api/flags/{flag_id}/confirm")
     def confirm(flag_id: int, body: ConfirmIn, user=Depends(current_user)):
         with conn() as c:
-            return reports.confirm_flag(c, user, flag_id, body.lat, body.lon, body.accuracy, datetime.now(timezone.utc), settings)
+            result = reports.confirm_flag(c, user, flag_id, body.lat, body.lon, body.accuracy, datetime.now(timezone.utc), settings)
+        notify_flags_changed("confirm")
+        return result
 
     # ------------------------------------------------------------ voice
     # Turn text into speech audio (mp3), falling back to browser TTS if unavailable.
@@ -399,12 +440,16 @@ def create_app(settings: Optional[Settings] = None, validator=None):
                 signals.set_forced(c, body.name, body.mode)
         except ValueError:
             raise HTTPException(422, detail={"code": "bad_trigger"})
-        return {"sync": sync(force=True)}
+        result = {"sync": sync(force=True)}
+        notify_flags_changed("dev_force")
+        return result
 
     # Force a refresh of external signal data (dev tools only).
     @app.post("/api/dev/refresh", dependencies=[Depends(require_test_tools)])
     def dev_refresh():
-        return {"status": refresh_external(), "sync": sync(force=True)}
+        result = {"status": refresh_external(), "sync": sync(force=True)}
+        notify_flags_changed("dev_refresh")
+        return result
 
     @app.post("/api/dev/satellite", dependencies=[Depends(require_dev)])
     def dev_satellite():
@@ -424,7 +469,9 @@ def create_app(settings: Optional[Settings] = None, validator=None):
             c.execute("UPDATE features SET last_verified_at=NULL, info=NULL")
             c.execute("UPDATE users SET points=0, streak=0, best_streak=0, last_active_day=NULL")
             c.execute("DELETE FROM signals WHERE key='forced'")
-        return {"sync": sync(force=True)}
+        result = {"sync": sync(force=True)}
+        notify_flags_changed("dev_reset")
+        return result
 
     # ------------------------------------------------------------ admin review queue
     # List missions waiting for admin review.
@@ -437,7 +484,9 @@ def create_app(settings: Optional[Settings] = None, validator=None):
     @app.post("/api/admin/review/{mission_id}", dependencies=[Depends(require_admin)])
     def admin_decide(mission_id: int, body: ReviewIn):
         with conn() as c:
-            return missions.review_decide(c, settings, mission_id, body.approve, body.note, datetime.now(timezone.utc))
+            result = missions.review_decide(c, settings, mission_id, body.approve, body.note, datetime.now(timezone.utc))
+        notify_flags_changed("admin_review")
+        return result
 
     # Serve a mission's before/after photo file to an admin.
     @app.get("/api/admin/photo/{mission_id}", dependencies=[Depends(require_admin)])
