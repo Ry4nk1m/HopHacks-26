@@ -58,6 +58,7 @@ def active_missions(conn, user_id, now):
 
 # Let a user claim an open flag as a new mission, or resume one they already have.
 def accept(conn, user, flag_id, now):
+    db.write_lock(conn)
     flag = get_flag(conn, flag_id)
     if not flag or flag["status"] != "open":
         raise MissionError("flag_unavailable", 409)
@@ -141,6 +142,19 @@ def decide(verdict, purpose, manual_arrival):
     return "rejected", "low_confidence"
 
 
+def _finished_by_someone_else(flag, mission):
+    """A task you complete was resolved by another volunteer after you accepted it, so there is nothing left to credit."""
+    if rules.FLAG_TYPES[flag["type"]]["purpose"] != "complete":
+        return False
+    return flag["status"] == "resolved" and bool(flag["resolved_at"]) and flag["resolved_at"] >= mission["created_at"]
+
+
+def _too_late(conn, mission_id, flag, user_id):
+    conn.execute("UPDATE missions SET status='cancelled' WHERE id=?", (mission_id,))
+    conn.execute("UPDATE flags SET claimed_by=NULL, claim_expires_at=NULL WHERE id=? AND claimed_by=?", (flag["id"], user_id))
+    return _result("rejected", "already_done", retry=False)
+
+
 # Build the standard response dict returned from a photo submission.
 def _result(outcome, code, verdict=None, mission=None, flag=None, **extra):
     return {"outcome": outcome, "code": code, "retry": outcome == "rejected" and (mission is None or mission.get("remaining_attempts", 0) > 0),
@@ -175,6 +189,8 @@ def submit(settings, validator, user_id, mission_id, photo_bytes, before_bytes, 
         if db.parse_iso(m["arrived_at"]) < now - timedelta(minutes=rules.ARRIVAL_VALID_MINUTES):
             raise MissionError("arrival_expired", 409)
         flag = get_flag(conn, m["flag_id"])
+        if _finished_by_someone_else(flag, m):
+            return _too_late(conn, mission_id, flag, user_id)
         cfg = rules.FLAG_TYPES[flag["type"]]
         radius = cfg["radius_m"] + _allowance(accuracy)
         if m["manual_arrival"]:
@@ -204,10 +220,13 @@ def submit(settings, validator, user_id, mission_id, photo_bytes, before_bytes, 
 
     # phase 3: record the outcome
     with db.connect(db_path) as conn:
+        db.write_lock(conn)
         m = _own_mission(conn, user_id, mission_id)
         if m["status"] not in ("accepted", "arrived"):
             raise MissionError("not_active", 409)
         flag = get_flag(conn, m["flag_id"])
+        if _finished_by_someone_else(flag, m):
+            return _too_late(conn, mission_id, flag, user_id)
         user = dict(conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone())
         outcome, code = decide(verdict, purpose, manual)
         recheck = None
@@ -318,6 +337,9 @@ def review_decide(conn, settings, mission_id, approve, note, now):
         conn.execute("UPDATE missions SET status='rejected' WHERE id=?", (mission_id,))
         conn.execute("UPDATE flags SET status='open', updated_at=? WHERE id=?", (stamp, flag["id"]))
         return {"status": "rejected"}
+    if _finished_by_someone_else(flag, m):
+        conn.execute("UPDATE missions SET status='cancelled' WHERE id=?", (mission_id,))
+        return {"status": "rejected", "code": "already_done"}
     verdict = Verdict.model_validate(json.loads(m["verdict"]))
     purpose = rules.FLAG_TYPES[flag["type"]]["purpose"]
     conn.execute("UPDATE flags SET status='open' WHERE id=?", (flag["id"],))

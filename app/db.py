@@ -125,6 +125,12 @@ def connect(db_path):
         conn.close()
 
 
+def write_lock(conn):
+    """Take the write lock before reading, so two people acting on the same flag at the same instant are handled one after the other."""
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+
+
 # Turn a cursor's rows into a list of plain dicts.
 def rows(cursor):
     return [dict(r) for r in cursor.fetchall()]

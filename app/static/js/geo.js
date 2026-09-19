@@ -24,6 +24,9 @@ export function circlePolygon(lat, lon, radiusM, steps = 48) {
   return { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [ring] } };
 }
 
+// Where the demo location puts you: Hodson Hall on the Johns Hopkins Homewood campus.
+export const DEMO_SPOT = { name: 'Hodson Hall', lat: 39.32755, lon: -76.62232 };
+
 /** Best current position: a demo location if set, otherwise the latest GPS fix. */
 export function getPos() {
   if (S.fake) return { lat: S.fake.lat, lon: S.fake.lon, acc: 8, ts: Date.now(), fake: true };

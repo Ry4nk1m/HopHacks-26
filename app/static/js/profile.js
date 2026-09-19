@@ -5,7 +5,7 @@ import { emit } from './bus.js';
 import { api } from './api.js';
 import { el, icon, toast, openSheet, closeSheet, sheetOpts, fmtDist } from './ui.js';
 import { t, flagTitle, codeMessage } from './i18n.js';
-import { getPos, setFake, clearFake, haversine } from './geo.js';
+import { getPos, setFake, clearFake, haversine, DEMO_SPOT } from './geo.js';
 import { stopVoice } from './voice.js';
 
 let boardTab = 'weekly';
@@ -114,7 +114,7 @@ export function demoTools(reopen, done) {
   return [
     el('h3', {}, t('prof_demo')),
     el('p', { class: 'muted small' }, t('prof_fake_help')),
-    el('div', { class: 'tags' }, near.map(({ f }) => el('button', { class: 'tag', onclick: () => { setFake(f.lat + 0.00006, f.lon); emit('map:center', { lat: f.lat, lon: f.lon }); toast(t('teleported')); done(); } }, short(flagTitle(f))))),
+    el('div', { class: 'tags' }, el('button', { class: 'tag', onclick: () => { setFake(DEMO_SPOT.lat, DEMO_SPOT.lon); emit('map:center', { lat: DEMO_SPOT.lat, lon: DEMO_SPOT.lon }); toast(t('teleported')); done(); } }, DEMO_SPOT.name), near.map(({ f }) => el('button', { class: 'tag', onclick: () => { setFake(f.lat + 0.00006, f.lon); emit('map:center', { lat: f.lat, lon: f.lon }); toast(t('teleported')); done(); } }, short(flagTitle(f))))),
     S.fake ? el('div', { class: 'actions' }, el('button', { class: 'btn', onclick: () => { clearFake(); done(); } }, t('prof_real'))) : null,
     ...weatherTools(reopen),
     el('div', { class: 'actions' },

@@ -127,7 +127,15 @@ function tuneBasemap() {
   ['poi_r1', 'poi_transit'].forEach((id) => { if (has(id)) map.setLayoutProperty(id, 'visibility', 'none'); });
   // keep place names (useful when walking) but drop their little icons so they don't compete with our flags
   ['poi_r7', 'poi_r20'].forEach((id) => { if (has(id)) safe(() => map.setPaintProperty(id, 'icon-opacity', 0)); });
-  if (has('road_path_pedestrian')) safe(() => map.setPaintProperty('road_path_pedestrian', 'line-opacity', 0.6));
+  // footpaths: a quiet warm dashed line that reads as a path, instead of noisy white dots
+  ['road_path_pedestrian', 'bridge_path_pedestrian'].forEach((id) => {
+    if (!has(id)) return;
+    safe(() => map.setPaintProperty(id, 'line-color', '#d3c7aa'));
+    safe(() => map.setPaintProperty(id, 'line-width', ['interpolate', ['linear'], ['zoom'], 14, 0.6, 16, 1.1, 18, 2, 20, 3.4]));
+    safe(() => map.setPaintProperty(id, 'line-dasharray', [3, 1.8]));
+    safe(() => map.setPaintProperty(id, 'line-opacity', ['interpolate', ['linear'], ['zoom'], 14, 0, 15.2, 0.9]));
+    safe(() => map.setLayoutProperty(id, 'line-cap', 'butt'));
+  });
   // warm palette: cream land, sage parks, teal-tinted water, peach and amber main roads
   const paint = (id, prop, value) => { if (has(id)) safe(() => map.setPaintProperty(id, prop, value)); };
   paint('background', 'background-color', '#f6f0e2');

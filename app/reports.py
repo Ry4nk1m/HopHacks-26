@@ -99,6 +99,7 @@ def create_report(settings, validator, user_id, photo_bytes, claimed_type, note,
 
 
 def confirm_flag(conn, user, flag_id, lat, lon, accuracy, now, settings):
+    db.write_lock(conn)
     """Tap-to-confirm for someone else's unconfirmed report: you must be standing near it."""
     if not valid_coord(lat, lon):
         raise MissionError("bad_location", 422)

@@ -609,3 +609,45 @@ def test_open_cooling_space_is_recorded_as_usable(env):
         row = c.execute("SELECT feature_id FROM flags WHERE id=?", (f["id"],)).fetchone()
         info = json.loads(c.execute("SELECT info FROM features WHERE id=?", (row["feature_id"],)).fetchone()["info"])
     assert info["status"] == "usable" and info["hours_text"] == "Mon-Fri 9-5" and info["reason"] is None
+
+
+# Two volunteers on one task: the first to be verified is credited; a slower one is told kindly and paid nothing.
+def test_second_finisher_of_the_same_task_is_not_paid(env):
+    a, b = signup(env, "Ana"), signup(env, "Ben")
+    f = flag(env, "drain_clear", "311", user=a)
+    ma = start(env, a, f)
+    with db.connect(env.path) as c:   # Ana's 45 minute claim lapses while she is still on her way
+        c.execute("UPDATE flags SET claim_expires_at='2000-01-01T00:00:00+00:00' WHERE id=?", (f["id"],))
+    mb = start(env, b, f)
+    first = submit(env, b, mb, f["lat"], f["lon"], seed=71).json()
+    late = submit(env, a, ma, f["lat"], f["lon"], seed=72).json()
+    assert first["outcome"] == "verified" and first["points"] > 0
+    assert late["outcome"] == "rejected" and late["code"] == "already_done" and late["retry"] is False and not late.get("points")
+    assert me(env, a)["points"] == 0 and me(env, b)["points"] == first["points"]
+    assert env.v.calls and len(env.v.calls) == 1   # the slower photo never reached the model
+    assert env.client.post(f"/api/missions/{ma}/submit", headers=H(a), files={"photo": ("p.jpg", photo_bytes(73), "image/jpeg")},
+                           data={"lat": f["lat"], "lon": f["lon"], "accuracy": 10}).status_code == 409   # the mission is closed
+
+
+# A task that comes back after its cooldown is a new job: an old mission does not count as "finished by someone else".
+def test_finished_by_someone_else_only_counts_after_you_accepted(env):
+    from app import missions
+    now = datetime.now(timezone.utc)
+    flag_row = {"type": "drain_clear", "status": "resolved", "resolved_at": (now - timedelta(days=1)).isoformat()}
+    assert missions._finished_by_someone_else(flag_row, {"created_at": now.isoformat()}) is False
+    assert missions._finished_by_someone_else(flag_row, {"created_at": (now - timedelta(days=2)).isoformat()}) is True
+    assert missions._finished_by_someone_else({**flag_row, "type": "problem_report"}, {"created_at": (now - timedelta(days=2)).isoformat()}) is False  # confirmations can stack
+
+
+# A slow admin approval cannot pay a mission whose task someone else already finished.
+def test_admin_approval_does_not_double_pay(env):
+    a, b = signup(env, "Ana"), signup(env, "Ben")
+    f = flag(env, "cooling_check", user=a)
+    env.v.set(confidence=0.5)   # Ana's photo needs a person to look at it
+    ma = start(env, a, f)
+    pend = submit(env, a, ma, f["lat"], f["lon"], seed=81).json()
+    assert pend["outcome"] == "pending"
+    with db.connect(env.path) as c:   # Ben's confident photo lands first and resolves the task
+        c.execute("UPDATE flags SET status='resolved', resolved_at=? WHERE id=?", (datetime.now(timezone.utc).isoformat(), f["id"]))
+    r = env.client.post(f"/api/admin/review/{ma}", headers={"X-Admin-Key": "adm-key"}, json={"approve": True}).json()
+    assert r == {"status": "rejected", "code": "already_done"} and me(env, a)["points"] == 0

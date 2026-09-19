@@ -56,6 +56,8 @@ const EN = {
   v_verified: 'Verified', v_pending: 'Sent for review', v_rejected: 'Not accepted', v_error: "Couldn't check",
   v_says: 'Photo check', v_retry: 'Try again',
   code_verified: 'Nice work! Your photo checks out.',
+  code_already_done: 'Someone else just finished this one. Thanks for going out there. The next flag is waiting.',
+  v_already: 'Already done',
   code_verified_unusable: "Thanks, that's useful to know. We've marked this place as not usable right now and taken it off the map. Someone will check it again soon.",
   verified_unusable_days: "Thanks, that's useful to know. We've marked this place as not usable right now and taken it off the map. Someone will check it again in about {n} days.",
   info_unusable: 'Last check {when}: not usable', info_unusable_why: 'Last check {when}: not usable ({why})',

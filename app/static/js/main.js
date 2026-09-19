@@ -5,7 +5,7 @@ import { on, emit } from './bus.js';
 import { api, token, ApiError } from './api.js';
 import { el, icon, toast, closeSheet, fmtDist, cToF, setKids, TYPE_ICON, TYPE_COLOR, TYPE_GLYPH } from './ui.js';
 import { t, flagTitle, codeMessage } from './i18n.js';
-import { startLocation, getPos, haversine, setFake } from './geo.js';
+import { startLocation, getPos, haversine, setFake, DEMO_SPOT } from './geo.js';
 import { initMap, pushFlags, pushUser, pushMission, setOverlay, flyTo, flyToUser, setSelected } from './mapview.js';
 import { openFlagSheet, openMissionSheet, openReportSheet, restoreMission } from './flows.js';
 import { openProfile, openAbout } from './profile.js';
@@ -145,7 +145,7 @@ function inAoi(p) {
 // A "use demo location" button, shown only when dev tools are enabled.
 function demoButton() {
   if (!S.cfg.dev_tools) return null;
-  return el('button', { onclick: () => { const [lat, lon] = S.cfg.center; setFake(lat, lon); flyTo(lat, lon, 16.5); } }, t('use_demo'));
+  return el('button', { onclick: () => { setFake(DEMO_SPOT.lat, DEMO_SPOT.lon); flyTo(DEMO_SPOT.lat, DEMO_SPOT.lon, 17); } }, t('use_demo'));
 }
 
 // Show a banner explaining GPS state (off, denied, waiting, outside area, weak signal), if any.

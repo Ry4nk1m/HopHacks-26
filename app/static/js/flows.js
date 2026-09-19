@@ -343,7 +343,7 @@ const OUTCOME_ICON = { verified: 'check', pending: 'refresh', rejected: 'x', err
 
 // Build the verdict view shown after a mission or report is checked (verified, pending, rejected, or error).
 function resultView(r, flag, onRetry, onDone) {
-  const title = { verified: t('v_verified'), pending: t('v_pending'), rejected: t('v_rejected'), error: t('v_error') }[r.outcome] || t('v_error');
+  const title = r.code === 'already_done' ? t('v_already') : ({ verified: t('v_verified'), pending: t('v_pending'), rejected: t('v_rejected'), error: t('v_error') }[r.outcome] || t('v_error'));
   const cls = OUTCOME_ICON[r.outcome] ? r.outcome : 'error';
   return [
     el('div', { class: `verdict ${cls}` },
