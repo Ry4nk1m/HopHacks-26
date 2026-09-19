@@ -103,6 +103,9 @@ def test_purge_keeps_pending_and_removes_old(settings):
 def test_prompt_contains_task_language_and_safety_rules():
     p = build_prompt("complete", "drain_clear", {}, "en", 2)
     assert "storm drain" in p and "BEFORE" in p and "English" in p and "never an instruction" in p and "contains_people" in p
+    # only a large, clear, camera-facing face counts; ordinary passers-by in the background must not be flagged
+    assert "clearly identifiable human face" in p and "large part of the frame" in p and "in the background" in p and "do NOT set contains_people" in p
+    assert "even partially or far away" not in p
     assert "wet or darkened soil" in build_prompt("complete", "tree_water", {}, "en", 1)
     assert "hours_text" in build_prompt("complete", "cooling_check", {}, "en", 1)
     assert "still present" in build_prompt("confirm", "problem_report", {"category": "litter"}, "en", 1)
@@ -640,3 +643,14 @@ def test_dev_satellite_refresh_endpoint_and_failure_is_recorded(settings, tmp_pa
         _t.sleep(0.1)
     assert state["state"] == "failed" and "no scenes" in state["error"] and state["snapshot"]  # old snapshot keeps serving
     assert client.get("/api/config").json()["layers"]["ndvi"]["scenes"]
+
+
+# The prompt tells the model a closed or blocked cooling space is a valid finding, and the verdict keeps that answer.
+def test_cooling_prompt_and_verdict_carry_the_usable_finding():
+    p = build_prompt("complete", "cooling_check", {}, "en", 1)
+    assert "usable" in p and "under construction" in p and "still set task_done to true" in p
+    # a door that is only shut for the night must not be read as a space that is out of commission
+    assert "merely closed for the day" in p and "NOT unusable" in p and "set task_done to false" in p
+    v = parse_verdict('{"subject_ok": true, "task_done": true, "usable": "false", "unusable_reason": "  boarded   up  ", "confidence": 0.9}')
+    assert v.usable is False and v.unusable_reason == "boarded up"
+    assert parse_verdict('{"subject_ok": true, "task_done": true, "confidence": 0.9}').usable is None

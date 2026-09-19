@@ -57,7 +57,10 @@ function featureBlock(flag) {
   if (f.address) rows.push(el('div', {}, el('strong', {}, `${t('info_address')}: `), f.address));
   if (f.hours) rows.push(el('div', {}, el('strong', {}, `${t('info_hours')}: `), f.hours));
   if (f.phone) rows.push(el('div', {}, el('strong', {}, `${t('info_phone')}: `), el('a', { href: `tel:${String(f.phone).replace(/[^\d+]/g, '')}` }, f.phone)));
-  if (f.verified) {
+  if (f.verified && f.verified.status === 'unusable') {
+    const v = f.verified;
+    rows.push(el('div', {}, v.reason ? t('info_unusable_why', { when: timeAgo(f.last_verified_at), why: v.reason }) : t('info_unusable', { when: timeAgo(f.last_verified_at) })));
+  } else if (f.verified) {
     const v = f.verified;
     rows.push(el('div', {}, v.hours_text ? t('info_verified', { when: timeAgo(f.last_verified_at), hours: v.hours_text }) : t('info_verified_nohours', { when: timeAgo(f.last_verified_at) }),
       v.accessible === true ? ` · ${t('info_accessible')}` : v.accessible === false ? ` · ${t('info_steps')}` : ''));

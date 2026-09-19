@@ -560,3 +560,42 @@ def test_weather_test_tools_are_off_without_an_admin_key_set(tmp_path):
     c = TestClient(create_app(Settings(data_dir=tmp_path, external_fetch=False, background_jobs=False, dev_tools=False, admin_key="")))
     assert c.get("/api/config").json()["test_unlock"] is False
     assert c.post("/api/dev/force", json={"name": "heat", "mode": "on"}, headers={"X-Admin-Key": ""}).status_code == 404  # looks like it does not exist
+
+
+# A cooling space found closed or under construction is a valid finding: full credit, off the map, back for a recheck later.
+def test_closed_cooling_space_is_a_verified_finding_and_returns_for_a_recheck(env):
+    from app import triggers
+    u = signup(env)
+    f = flag(env, "cooling_check", user=u)
+    env.v.set(usable=False, unusable_reason="construction fencing across the entrance", hours_text=None)
+    r = submit(env, u, start(env, u, f), f["lat"], f["lon"], seed=41).json()
+    assert r["outcome"] == "verified" and r["code"] == "verified_unusable" and r["points"] > 0
+    assert f["id"] not in {x["id"] for x in env.client.get("/api/flags", headers=H(u)).json()["flags"]}   # off the map
+
+    with db.connect(env.path) as c:
+        row = c.execute("SELECT feature_id FROM flags WHERE id=?", (f["id"],)).fetchone()
+        info = json.loads(c.execute("SELECT info FROM features WHERE id=?", (row["feature_id"],)).fetchone()["info"])
+        assert info["status"] == "unusable" and "construction" in info["reason"]
+
+        # heat makes every cooling space eligible, but this one stays off the map for 14 days...
+        env.client.post("/api/dev/force", json={"name": "heat", "mode": "on"})
+        soon = datetime.now(timezone.utc) + timedelta(days=13)
+        triggers.sync_flags(c, env.settings, None, soon)
+        assert c.execute("SELECT status FROM flags WHERE id=?", (f["id"],)).fetchone()["status"] == "resolved"
+        # ...then it comes back so someone can look again
+        later = datetime.now(timezone.utc) + timedelta(days=15)
+        triggers.sync_flags(c, env.settings, None, later)
+        assert c.execute("SELECT status FROM flags WHERE id=?", (f["id"],)).fetchone()["status"] == "open"
+
+
+# A normal check still records the space as usable, with its hours.
+def test_open_cooling_space_is_recorded_as_usable(env):
+    u = signup(env)
+    f = flag(env, "cooling_check", user=u)
+    env.v.set(usable=True, hours_text="Mon-Fri 9-5")
+    r = submit(env, u, start(env, u, f), f["lat"], f["lon"], seed=42).json()
+    assert r["outcome"] == "verified" and r["code"] == "verified"
+    with db.connect(env.path) as c:
+        row = c.execute("SELECT feature_id FROM flags WHERE id=?", (f["id"],)).fetchone()
+        info = json.loads(c.execute("SELECT info FROM features WHERE id=?", (row["feature_id"],)).fetchone()["info"])
+    assert info["status"] == "usable" and info["hours_text"] == "Mon-Fri 9-5" and info["reason"] is None

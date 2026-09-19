@@ -210,6 +210,8 @@ def submit(settings, validator, user_id, mission_id, photo_bytes, before_bytes, 
         flag = get_flag(conn, m["flag_id"])
         user = dict(conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone())
         outcome, code = decide(verdict, purpose, manual)
+        if outcome == "verified" and flag["type"] == "cooling_check" and verdict.usable is False:
+            code = "verified_unusable"  # a real finding: the space is closed or blocked right now
         stamp = _iso(now)
         attempts = m["attempts"] + 1
         conn.execute("UPDATE missions SET attempts=?, verdict=?, submitted_at=?, was_problem=?, lat=?, lon=?, accuracy=? WHERE id=?",
@@ -256,7 +258,9 @@ def _finalize_verified(conn, settings, mission_id, flag, user, verdict, purpose,
         conn.execute("UPDATE flags SET status='resolved', resolved_at=?, claimed_by=NULL, claim_expires_at=NULL, updated_at=? WHERE id=?",
                      (stamp, stamp, flag["id"]))
         if flag["type"] == "cooling_check" and flag["feature_id"]:
-            features.mark_verified(conn, flag["feature_id"], {"hours_text": verdict.hours_text, "accessible": verdict.accessible, "observed_at": stamp}, stamp)
+            status = "unusable" if verdict.usable is False else "usable" if verdict.usable is True else "unknown"
+            features.mark_verified(conn, flag["feature_id"], {"hours_text": verdict.hours_text, "accessible": verdict.accessible, "observed_at": stamp,
+                                                              "status": status, "reason": verdict.unusable_reason if status == "unusable" else None}, stamp)
     elif verdict.problem_present:
         conn.execute("UPDATE flags SET status='open', verified_count = verified_count + 1, claimed_by=NULL, claim_expires_at=NULL, updated_at=? WHERE id=?",
                      (stamp, flag["id"]))
