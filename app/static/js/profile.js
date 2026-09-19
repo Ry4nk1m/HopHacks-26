@@ -80,14 +80,26 @@ export function weatherTools(reopen) {
         setTimeout(reopen, 700);
       } }, text))));
   const anyForced = ['heat', 'rain', 'dry'].some((n) => (forced[n] || 'auto') !== 'auto');
+  const PRESETS = [
+    ['preset_heat', { heat: 'on', dry: 'on', rain: 'off' }],
+    ['preset_storm', { rain: 'on', heat: 'off', dry: 'off' }],
+    ['preset_all', { heat: 'on', rain: 'on', dry: 'on' }],
+    ['preset_real', { heat: 'auto', rain: 'auto', dry: 'auto' }],
+  ];
+  // a preset shows as selected while the current overrides match it exactly
+  const isActive = (modes) => Object.entries(modes).every(([n, m]) => (forced[n] || 'auto') === m);
+  const presetButtons = PRESETS.map(([key, modes]) => {
+    const btn = el('button', { class: 'btn', 'aria-pressed': String(isActive(modes)), onclick: () => {
+      grid.querySelectorAll('.btn').forEach((b) => b.setAttribute('aria-pressed', String(b === btn)));
+      preset(modes);
+    } }, t(key));
+    return btn;
+  });
+  const grid = el('div', { class: 'preset-grid' }, ...presetButtons);
   return [
     el('h3', {}, t('prof_weather_test')),
     el('p', { class: 'muted small' }, anyForced ? t('force_active') : t('force_help')),
-    el('div', { class: 'preset-grid' },
-      el('button', { class: 'btn', onclick: () => preset({ heat: 'on', dry: 'on', rain: 'off' }) }, t('preset_heat')),
-      el('button', { class: 'btn', onclick: () => preset({ rain: 'on', heat: 'off', dry: 'off' }) }, t('preset_storm')),
-      el('button', { class: 'btn', onclick: () => preset({ heat: 'on', rain: 'on', dry: 'on' }) }, t('preset_all')),
-      el('button', { class: 'btn primary', onclick: () => preset({ heat: 'auto', rain: 'auto', dry: 'auto' }) }, t('preset_real'))),
+    grid,
     el('h3', {}, t('prof_force')), force('heat', t('force_heat')), force('rain', t('force_rain')), force('dry', t('force_dry')),
     el('div', { class: 'actions' },
       el('button', { class: 'btn', onclick: async () => { try { await api('/api/dev/refresh', { method: 'POST' }); } catch (e) { toast(codeMessage(e.code)); } emit('flags:refresh'); toast(t('prof_refresh')); } }, icon('refresh', 18), t('prof_refresh'))),

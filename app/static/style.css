@@ -230,3 +230,5 @@ table.lb td:last-child { text-align: right; font-weight: 600; }
 .preset-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 8px 0 4px; }
 .preset-grid .btn { min-height: 46px; padding: 10px 8px; font-size: .88rem; }
 .dr-foot { cursor: default; user-select: none; -webkit-user-select: none; }
+.preset-grid .btn[aria-pressed="true"] { background: var(--hud-accent); color: var(--hud-accent-fg); border-color: var(--hud-accent); }
+.dr-demo .preset-grid .btn[aria-pressed="true"] { color: var(--hud-accent-fg); }
