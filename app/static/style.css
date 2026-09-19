@@ -232,3 +232,4 @@ table.lb td:last-child { text-align: right; font-weight: 600; }
 .dr-foot { cursor: default; user-select: none; -webkit-user-select: none; }
 .preset-grid .btn[aria-pressed="true"] { background: var(--hud-accent); color: var(--hud-accent-fg); border-color: var(--hud-accent); }
 .dr-demo .preset-grid .btn[aria-pressed="true"] { color: var(--hud-accent-fg); }
+.cond.official { background: #8f1f0e; font-weight: 700; }

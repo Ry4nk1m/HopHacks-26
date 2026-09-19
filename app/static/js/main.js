@@ -3,7 +3,7 @@
 import { S, store, visibleFlags } from './state.js';
 import { on, emit } from './bus.js';
 import { api, token, ApiError } from './api.js';
-import { el, icon, toast, closeSheet, fmtDist, setKids, TYPE_ICON, TYPE_COLOR, TYPE_GLYPH } from './ui.js';
+import { el, icon, toast, closeSheet, fmtDist, cToF, setKids, TYPE_ICON, TYPE_COLOR, TYPE_GLYPH } from './ui.js';
 import { t, flagTitle, codeMessage } from './i18n.js';
 import { startLocation, getPos, haversine, setFake } from './geo.js';
 import { initMap, pushFlags, pushUser, pushMission, setOverlay, flyTo, flyToUser, setSelected } from './mapview.js';
@@ -84,7 +84,13 @@ function renderConds() {
   const pills = [];
   if (c) {
     const demo = (name) => (c.forced && c.forced[name] === 'on' ? ` (${t('cond_demo')})` : '');
-    if (c.heat) pills.push(el('span', { class: 'cond' }, t('cond_heat') + demo('heat')));
+    if (c.heat) {
+      // only call it an alert when the National Weather Service actually issued one; otherwise it is our own forecast trigger
+      const official = (c.events || []).find((e) => /heat/i.test(e));
+      const peak = c.metrics && c.metrics.max_apparent_next3_c;
+      const label = official || (peak != null ? t('cond_heat_peak', { f: cToF(peak) }) : t('cond_heat'));
+      pills.push(el('span', { class: `cond${official ? ' official' : ''}` }, label + demo('heat')));
+    }
     if (c.rain) pills.push(el('span', { class: 'cond rain' }, t('cond_rain') + demo('rain')));
     if (c.dry) pills.push(el('span', { class: 'cond dry' }, t('cond_dry') + demo('dry')));
   }

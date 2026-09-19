@@ -101,7 +101,7 @@ const EN = {
   ov_title: 'Satellite layers', ov_off: 'Off', ov_ndvi: 'Vegetation (Sentinel-2, 30 m)', ov_lst: 'Surface heat (Landsat, 30 m)',
   ov_note_ndvi: 'Clear scenes: {dates}', ov_note_lst: 'Scenes: {dates}, about 10:30 am',
   ov_low_green: 'Less green', ov_high_green: 'More green', ov_cool: 'Cooler', ov_hot: 'Hotter',
-  cond_heat: 'Heat alert', cond_rain: 'Heavy rain expected', cond_dry: 'Dry spell', cond_demo: 'demo',
+  cond_heat: 'Hot days ahead', cond_heat_peak: 'Hot days ahead: up to {f}°F', cond_rain: 'Heavy rain expected', cond_dry: 'Dry spell', cond_demo: 'demo',
   nearest: 'Nearest', nothing_near: 'No flags match this filter', mission_active: 'Mission in progress',
   gps_denied: 'Location is off. Turn it on to see flags near you.', gps_waiting: 'Finding your location…',
   gps_outside: "You're outside Baltimore, so no flags are near you.", gps_weak: 'Weak GPS (±{a}). Move to open sky.',
