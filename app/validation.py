@@ -34,6 +34,7 @@ class Verdict(BaseModel):
     accessible: Optional[bool] = None
     usable: Optional[bool] = None
     unusable_reason: Optional[str] = None
+    reopen_days: Optional[int] = None
     blocked_underground: Optional[bool] = None
     reasoning: str = ""
 
@@ -81,6 +82,18 @@ class Verdict(BaseModel):
     def _strict_bool(cls, v):
         return v is True or (isinstance(v, str) and v.strip().lower() == "true")
 
+    # A whole number of days, or nothing. The bounds are applied where the value is used.
+    @field_validator("reopen_days", mode="before")
+    @classmethod
+    def _reopen(cls, v):
+        if isinstance(v, bool):
+            return None
+        try:
+            n = int(float(v))
+        except (TypeError, ValueError):
+            return None
+        return n if n > 0 else None
+
     # Keep the reason short and tidy.
     @field_validator("unusable_reason", mode="before")
     @classmethod
@@ -119,6 +132,7 @@ JSON_SHAPE = """{
   "accessible": true|false|null,
   "usable": true|false|null,
   "unusable_reason": string|null,
+  "reopen_days": integer|null,
   "blocked_underground": true|false|null,
   "reasoning": "one or two short sentences"
 }"""
@@ -156,6 +170,10 @@ TASKS = {
         "If the door is closed for the day and no opening hours or notice are visible, set task_done to false. "
         "A space that is out of commission is a valid finding, so still set task_done to true for it. "
         "unusable_reason: when usable is false, say why in a few words, for example construction fencing across the entrance, otherwise null. "
+        "reopen_days: only when usable is false, your best estimate in whole days until the space is likely usable again, between 2 and 14. "
+        "Use a posted reopening date if a sign gives one. Otherwise judge from what you see (a small repair or temporary barrier is a few days, "
+        "heavy scaffolding or a boarded-up building is closer to two weeks) and lean short: when unsure, choose the smaller number, because it is "
+        "better to check again too soon than to hide a resource that has come back. Null when usable is not false. "
         "hours_text: transcribe posted opening hours exactly as written if legible, otherwise null. accessible: true if a ramp, level entry or automatic door is visible, "
         "false if only stairs are visible, null if unclear."
     ),

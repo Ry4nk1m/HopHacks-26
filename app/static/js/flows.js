@@ -349,7 +349,7 @@ function resultView(r, flag, onRetry, onDone) {
     el('div', { class: `verdict ${cls}` },
       el('div', { class: 'badge' }, icon(OUTCOME_ICON[cls], 34)),
       el('h2', {}, title),
-      el('p', {}, codeMessage(r.code)),
+      el('p', {}, r.code === 'verified_unusable' && r.recheck_days ? t('verified_unusable_days', { n: r.recheck_days }) : codeMessage(r.code)),
       r.points ? el('div', { class: 'bigpts' }, t('earned', { n: r.points })) : null,
       r.streak ? el('div', { class: 'muted' }, el('span', { style: { display: 'inline-flex', gap: '4px', alignItems: 'center' } }, icon('flame', 16), t('streak_days', { n: r.streak }))) : null,
       (r.new_badges || []).map((b) => el('p', {}, el('strong', {}, t('new_badge', { name: t(`b_${b}`) })))),

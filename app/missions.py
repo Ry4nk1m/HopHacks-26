@@ -210,8 +210,10 @@ def submit(settings, validator, user_id, mission_id, photo_bytes, before_bytes, 
         flag = get_flag(conn, m["flag_id"])
         user = dict(conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone())
         outcome, code = decide(verdict, purpose, manual)
+        recheck = None
         if outcome == "verified" and flag["type"] == "cooling_check" and verdict.usable is False:
-            code = "verified_unusable"  # a real finding: the space is closed or blocked right now
+            code = "verified_unusable"  # a real finding: the space is out of commission right now
+            recheck = rules.unusable_recheck_days(verdict.reopen_days)
         stamp = _iso(now)
         attempts = m["attempts"] + 1
         conn.execute("UPDATE missions SET attempts=?, verdict=?, submitted_at=?, was_problem=?, lat=?, lon=?, accuracy=? WHERE id=?",
@@ -241,7 +243,7 @@ def submit(settings, validator, user_id, mission_id, photo_bytes, before_bytes, 
         mission = mission_to_dict(conn.execute("SELECT * FROM missions WHERE id=?", (mission_id,)).fetchone())
         fresh = get_flag(conn, flag["id"])
         return _result("verified", code, verdict, mission, {"id": fresh["id"], "status": fresh["status"], "verified_count": fresh["verified_count"]},
-                       streak=streak, points=points, new_badges=new_badges)
+                       streak=streak, points=points, new_badges=new_badges, recheck_days=recheck)
 
 
 def _finalize_verified(conn, settings, mission_id, flag, user, verdict, purpose, now, streak, has_before):
@@ -260,7 +262,8 @@ def _finalize_verified(conn, settings, mission_id, flag, user, verdict, purpose,
         if flag["type"] == "cooling_check" and flag["feature_id"]:
             status = "unusable" if verdict.usable is False else "usable" if verdict.usable is True else "unknown"
             features.mark_verified(conn, flag["feature_id"], {"hours_text": verdict.hours_text, "accessible": verdict.accessible, "observed_at": stamp,
-                                                              "status": status, "reason": verdict.unusable_reason if status == "unusable" else None}, stamp)
+                                                              "status": status, "reason": verdict.unusable_reason if status == "unusable" else None,
+                                                              "recheck_days": rules.unusable_recheck_days(verdict.reopen_days) if status == "unusable" else None}, stamp)
     elif verdict.problem_present:
         conn.execute("UPDATE flags SET status='open', verified_count = verified_count + 1, claimed_by=NULL, claim_expires_at=NULL, updated_at=? WHERE id=?",
                      (stamp, flag["id"]))

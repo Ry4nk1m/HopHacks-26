@@ -654,3 +654,14 @@ def test_cooling_prompt_and_verdict_carry_the_usable_finding():
     v = parse_verdict('{"subject_ok": true, "task_done": true, "usable": "false", "unusable_reason": "  boarded   up  ", "confidence": 0.9}')
     assert v.usable is False and v.unusable_reason == "boarded up"
     assert parse_verdict('{"subject_ok": true, "task_done": true, "confidence": 0.9}').usable is None
+
+
+# The model's reopening estimate is a whole number of days or nothing; the app keeps it inside 2 to 14 and defaults to 3.
+def test_reopen_estimate_parsing_and_bounds():
+    good = '{"subject_ok": true, "task_done": true, "usable": false, "confidence": 0.9, "reopen_days": %s}'
+    assert parse_verdict(good % "5").reopen_days == 5 and parse_verdict(good % '"7"').reopen_days == 7 and parse_verdict(good % "4.6").reopen_days == 4
+    assert parse_verdict(good % "null").reopen_days is None and parse_verdict(good % '"soon"').reopen_days is None
+    assert parse_verdict(good % "0").reopen_days is None and parse_verdict(good % "-3").reopen_days is None and parse_verdict(good % "true").reopen_days is None
+    assert [rules.unusable_recheck_days(x) for x in (None, 1, 2, 9, 14, 60)] == [3, 2, 2, 9, 14, 14]
+    p = build_prompt("complete", "cooling_check", {}, "en", 1)
+    assert "reopen_days" in p and "between 2 and 14" in p and "lean short" in p and "check again too soon" in p

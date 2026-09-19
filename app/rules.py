@@ -17,7 +17,16 @@ ARRIVAL_VALID_MINUTES = 60
 MAX_ACTIVE_MISSIONS = 3
 MAX_ATTEMPTS = 3
 REPEAT_LOCKOUT_HOURS = 24
-UNUSABLE_RECHECK_DAYS = 14  # a cooling space found closed or blocked is checked again after this long
+# a cooling space found out of commission is checked again sooner than a healthy one; Gemini estimates how soon, and we lean toward
+# checking too often over hiding a resource that has come back
+UNUSABLE_MIN_DAYS, UNUSABLE_MAX_DAYS, UNUSABLE_DEFAULT_DAYS = 2, 14, 3
+
+
+def unusable_recheck_days(estimate):
+    """Days until an out-of-commission space is checked again: the model's estimate kept within 2 to 14, or 3 when it gave none."""
+    if estimate is None:
+        return UNUSABLE_DEFAULT_DAYS
+    return max(UNUSABLE_MIN_DAYS, min(UNUSABLE_MAX_DAYS, int(estimate)))
 DAILY_POINT_MISSIONS = 12
 
 ACCURACY_ALLOWANCE_CAP_M = 60

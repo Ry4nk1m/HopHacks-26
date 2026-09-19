@@ -94,10 +94,11 @@ def build_specs(conn, settings, satellite, cond, now):
 
     # --- cooling spaces: heat, or hours not verified recently
     stale_cutoff = _iso(now - timedelta(days=rules.FLAG_TYPES["cooling_check"]["cooldown_days"]))
-    unusable_cutoff = _iso(now - timedelta(days=rules.UNUSABLE_RECHECK_DAYS))
     for f in features_in_aoi(conn, settings, ["cooling_center", "community_space"]):
-        closed = (f["info"] or {}).get("status") == "unusable"
-        stale = not f["last_verified_at"] or f["last_verified_at"] < (unusable_cutoff if closed else stale_cutoff)
+        info = f["info"] or {}
+        closed = info.get("status") == "unusable"
+        cutoff = _iso(now - timedelta(days=rules.unusable_recheck_days(info.get("recheck_days")))) if closed else stale_cutoff
+        stale = not f["last_verified_at"] or f["last_verified_at"] < cutoff
         if not (cond["heat"] or stale):
             continue
         official = f["kind"] == "cooling_center"
@@ -149,8 +150,9 @@ def _apply(conn, spec, now):
     # Recently resolved flags of this type stay closed for a cooldown period before reopening.
     if row["status"] == "resolved":
         days = rules.FLAG_TYPES[spec["type"]].get("cooldown_days", 7)
-        if ((spec["context"].get("feature") or {}).get("verified") or {}).get("status") == "unusable":
-            days = min(days, rules.UNUSABLE_RECHECK_DAYS)
+        seen = (spec["context"].get("feature") or {}).get("verified") or {}
+        if seen.get("status") == "unusable":
+            days = min(days, rules.unusable_recheck_days(seen.get("recheck_days")))
         if row["resolved_at"] and row["resolved_at"] > _iso(now - timedelta(days=days)):
             return "cooldown"
     # Otherwise, reopen the flag with fresh details.

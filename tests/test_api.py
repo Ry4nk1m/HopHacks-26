@@ -562,30 +562,40 @@ def test_weather_test_tools_are_off_without_an_admin_key_set(tmp_path):
     assert c.post("/api/dev/force", json={"name": "heat", "mode": "on"}, headers={"X-Admin-Key": ""}).status_code == 404  # looks like it does not exist
 
 
-# A cooling space found closed or under construction is a valid finding: full credit, off the map, back for a recheck later.
+# A cooling space found closed or under construction is a valid finding: full credit, off the map, back for a recheck when Gemini expects it to reopen.
 def test_closed_cooling_space_is_a_verified_finding_and_returns_for_a_recheck(env):
     from app import triggers
     u = signup(env)
     f = flag(env, "cooling_check", user=u)
-    env.v.set(usable=False, unusable_reason="construction fencing across the entrance", hours_text=None)
+    env.v.set(usable=False, unusable_reason="construction fencing across the entrance", hours_text=None, reopen_days=10)
     r = submit(env, u, start(env, u, f), f["lat"], f["lon"], seed=41).json()
-    assert r["outcome"] == "verified" and r["code"] == "verified_unusable" and r["points"] > 0
+    assert r["outcome"] == "verified" and r["code"] == "verified_unusable" and r["points"] > 0 and r["recheck_days"] == 10
     assert f["id"] not in {x["id"] for x in env.client.get("/api/flags", headers=H(u)).json()["flags"]}   # off the map
 
     with db.connect(env.path) as c:
         row = c.execute("SELECT feature_id FROM flags WHERE id=?", (f["id"],)).fetchone()
         info = json.loads(c.execute("SELECT info FROM features WHERE id=?", (row["feature_id"],)).fetchone()["info"])
-        assert info["status"] == "unusable" and "construction" in info["reason"]
+        assert info["status"] == "unusable" and "construction" in info["reason"] and info["recheck_days"] == 10
 
-        # heat makes every cooling space eligible, but this one stays off the map for 14 days...
+        # heat makes every cooling space eligible, but this one stays off the map until its estimate runs out...
         env.client.post("/api/dev/force", json={"name": "heat", "mode": "on"})
-        soon = datetime.now(timezone.utc) + timedelta(days=13)
-        triggers.sync_flags(c, env.settings, None, soon)
+        triggers.sync_flags(c, env.settings, None, datetime.now(timezone.utc) + timedelta(days=9))
         assert c.execute("SELECT status FROM flags WHERE id=?", (f["id"],)).fetchone()["status"] == "resolved"
         # ...then it comes back so someone can look again
-        later = datetime.now(timezone.utc) + timedelta(days=15)
-        triggers.sync_flags(c, env.settings, None, later)
+        triggers.sync_flags(c, env.settings, None, datetime.now(timezone.utc) + timedelta(days=11))
         assert c.execute("SELECT status FROM flags WHERE id=?", (f["id"],)).fetchone()["status"] == "open"
+
+
+# No estimate from the model means a short, cautious recheck; wild estimates are pulled into the 2 to 14 day range.
+def test_recheck_estimate_defaults_short_and_is_clamped(env):
+    u = signup(env)
+    for seed, given, expected in ((51, None, 3), (52, 1, 2), (53, 90, 14)):
+        env.v.set(usable=False, unusable_reason="closed", reopen_days=given)
+        f = next(x for x in env.client.get("/api/flags", headers=H(u)).json()["flags"] if x["type"] == "cooling_check")
+        r = submit(env, u, start(env, u, f), f["lat"], f["lon"], seed=seed).json()
+        assert r["outcome"] == "verified" and r["recheck_days"] == expected, (given, r.get("recheck_days"))
+        with db.connect(env.path) as c:   # let the same-flag lockout pass so the next case can use another space
+            c.execute("UPDATE missions SET submitted_at='2020-01-01T00:00:00+00:00'")
 
 
 # A normal check still records the space as usable, with its hours.
