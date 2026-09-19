@@ -20,14 +20,29 @@ function setPanelX(px, animate) {
 const width = () => panel.getBoundingClientRect().width || 300;
 
 // Follow a pointer drag, moving the panel and scrim along with it, until the drag ends.
-function track(startX, from, onEnd) {
+// Only a mostly horizontal drag counts as a swipe: scrolling the panel, or a touch the browser cancels to scroll, must never close it.
+function track(startX, startY, from, onEnd) {
   const w = width();
-  const move = (e) => { setPanelX(Math.max(-w, Math.min(0, from + (e.clientX - startX))), false); scrim.style.opacity = String(1 + Math.max(-w, Math.min(0, from + (e.clientX - startX))) / w); };
-  const up = (e) => {
-    window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
-    onEnd(e.clientX - startX);
+  let horizontal = null;
+  const move = (e) => {
+    const dx = e.clientX - startX, dy = e.clientY - startY;
+    if (horizontal === null) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      horizontal = Math.abs(dx) > Math.abs(dy);
+    }
+    if (!horizontal) return;
+    const x = Math.max(-w, Math.min(0, from + dx));
+    setPanelX(x, false);
+    scrim.style.opacity = String(1 + x / w);
   };
-  window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
+  const end = (e, cancelled) => {
+    window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', cancel);
+    const isSwipe = !cancelled && horizontal !== false;
+    onEnd(isSwipe ? e.clientX - startX : 0, isSwipe);
+  };
+  const up = (e) => end(e, false);
+  const cancel = (e) => end(e, true);
+  window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', cancel);
 }
 
 // Open the drawer panel.
@@ -132,15 +147,14 @@ export function initDrawer(host) {
     const startX = e.clientX;
     setPanelX(-w, false);
     scrim.style.opacity = '0';
-    track(startX - EDGE_PX / 2, -w, (dx) => {
+    track(startX - EDGE_PX / 2, e.clientY, -w, (dx, isSwipe) => {
       root.classList.remove('dragging');
-      if (dx > OPEN_DIST || dx < 4) { isOpen = false; openDrawer(); } else { root.classList.remove('open'); setPanelX(-w - 20, true); scrim.style.opacity = ''; }
+      if (isSwipe && (dx > OPEN_DIST || dx < 4)) { isOpen = false; openDrawer(); } else { root.classList.remove('open'); setPanelX(-w - 20, true); scrim.style.opacity = ''; }
     });
   });
   panel.addEventListener('pointerdown', (e) => {
     if (!isOpen || e.target.closest('button, input')) return;
-    const w = width();
-    track(e.clientX, 0, (dx) => { if (dx < -OPEN_DIST) closeDrawer(); else { setPanelX(0, true); scrim.style.opacity = ''; } });
+    track(e.clientX, e.clientY, 0, (dx, isSwipe) => { if (isSwipe && dx < -OPEN_DIST) closeDrawer(); else { setPanelX(0, true); scrim.style.opacity = ''; } });
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
 }
