@@ -156,6 +156,7 @@ table.lb td:last-child { text-align: right; font-weight: 600; }
 @keyframes rise { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes fadeUp { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
 .ob-body { animation: fadeUp .32s ease both; }
+.ob-body.still { animation: none; }
 .ob-dots { display: flex; gap: 6px; justify-content: center; margin-bottom: 14px; }
 .ob-dots span { width: 7px; height: 7px; border-radius: 4px; background: var(--line); transition: all .25s; }
 .ob-dots span.done { background: var(--accent); opacity: .55; }

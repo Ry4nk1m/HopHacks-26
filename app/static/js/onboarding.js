@@ -89,13 +89,24 @@ export function showOnboarding(onDone) {
 
   function stepSafety() {
     const items = [['shield', 'safe_1'], ['camera', 'safe_2'], ['alert', 'safe_3']];
-    const all = ob.agreed.every(Boolean);
+    const cta = el('button', { class: 'cta', disabled: !ob.agreed.every(Boolean), onclick: () => go(3) }, t('ob_agree'));
+    // toggle in place: rebuilding the card here made the whole sheet jump and re-animate
+    const rows = items.map(([ic, key], i) => {
+      const tick = el('div', { class: 'tick' }, ob.agreed[i] ? icon('check', 16) : null);
+      const row = el('button', { class: `pledge${ob.agreed[i] ? ' on' : ''}`, role: 'checkbox', 'aria-checked': String(ob.agreed[i]),
+        onclick: () => {
+          ob.agreed[i] = !ob.agreed[i];
+          row.classList.toggle('on', ob.agreed[i]);
+          row.setAttribute('aria-checked', String(ob.agreed[i]));
+          setKids(tick, ob.agreed[i] ? icon('check', 16) : null);
+          cta.disabled = !ob.agreed.every(Boolean);
+        } },
+        el('div', { class: 'ob-ic' }, icon(ic, 20)), el('span', {}, t(key)), tick);
+      return row;
+    });
     return [
       el('h1', { class: 'ob-h' }, t('ob_safe_title')), el('p', { class: 'ob-sub' }, t('ob_safe_sub')),
-      el('div', { class: 'ob-how' }, items.map(([ic, key], i) => el('button', { class: `pledge${ob.agreed[i] ? ' on' : ''}`, role: 'checkbox', 'aria-checked': String(ob.agreed[i]),
-        onclick: () => { ob.agreed[i] = !ob.agreed[i]; renderCard(); } },
-        el('div', { class: 'ob-ic' }, icon(ic, 20)), el('span', {}, t(key)), el('div', { class: 'tick' }, ob.agreed[i] ? icon('check', 16) : null)))),
-      el('button', { class: 'cta', disabled: !all, onclick: () => go(3) }, t('ob_agree')), back()];
+      el('div', { class: 'ob-how' }, rows), cta, back()];
   }
 
   async function finish(locChoice) {
@@ -127,9 +138,14 @@ export function showOnboarding(onDone) {
       el('button', { class: 'ghost', disabled: ob.busy, onclick: () => { S.locState = 'off'; emit('pos'); finish('off'); } }, t('ob_loc_skip'))];
   }
 
+  let lastStep = -1;
   function renderCard() {
     const body = [stepWelcome, stepName, stepSafety, stepLocation][ob.step]();
-    setKids(card, dots(), el('div', { class: 'ob-body' }, body));
+    const same = lastStep === ob.step;
+    const keep = card.scrollTop;
+    lastStep = ob.step;
+    setKids(card, dots(), el('div', { class: `ob-body${same ? ' still' : ''}` }, body));
+    if (same) card.scrollTop = keep;
     const input = card.querySelector('input.field');
     if (input && ob.step === 1 && !ob.name) input.focus({ preventScroll: true });
   }
