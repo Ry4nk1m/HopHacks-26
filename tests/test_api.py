@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app import db, signals, triggers
+from app import db, rules, signals, triggers
 from app.config import Settings
 from app.main import create_app
 from tests.helpers import Scripted, blurry_photo, photo_bytes
@@ -695,3 +695,53 @@ def test_old_database_gains_the_note_column(tmp_path):
     con.commit(); con.close()
     with db.connect(old) as c:
         assert "note" in {r[1] for r in c.execute("PRAGMA table_info(missions)")}
+
+
+# Only tasks where you physically fix something (watering, clearing a drain) offer a before photo; checking a space does not.
+def test_before_photo_is_offered_only_for_tasks_that_change_something(env):
+    by_type = {}
+    for f in env.client.get("/api/flags").json()["flags"]:
+        by_type.setdefault(f["type"], set()).add(f["before_after"])
+    assert by_type["cooling_check"] == {False} and by_type["flood_report"] == {False} and by_type["problem_report"] == {False}
+    rain = env.client.post("/api/dev/force", json={"name": "rain", "mode": "on"})
+    dry = env.client.post("/api/dev/force", json={"name": "dry", "mode": "on"})
+    assert rain.status_code == 200 and dry.status_code == 200
+    for f in env.client.get("/api/flags").json()["flags"]:
+        if f["type"] in ("tree_water", "drain_clear"):
+            assert f["before_after"] is True
+    assert rules.FLAG_TYPES["tree_water"]["before_after"] and rules.FLAG_TYPES["drain_clear"]["before_after"]
+    assert not rules.FLAG_TYPES["cooling_check"].get("before_after")
+
+
+# What one person files or finishes is visible to everyone else, without exposing who they are or their photos.
+def test_reports_and_finished_tasks_are_visible_to_other_people(env):
+    ana, ben, cara = signup(env, "Ana Reporter"), signup(env, "Ben Walker"), signup(env, "Cara Helper")
+    env.v.set(category="litter", confidence=0.6, problem_present=True)
+    fid = report(env, ana, note="Bags piled by the curb").json()["flag_id"]
+
+    for who, headers in (("Ben", H(ben)), ("Cara", H(cara)), ("a visitor with no account", {})):
+        listing = env.client.get("/api/flags", headers=headers).json()["flags"]
+        seen = next((f for f in listing if f["id"] == fid), None)
+        assert seen and seen["source"] == "user" and seen["type"] == "problem_report" and seen["unconfirmed"] is True, who
+        assert seen["context"]["report"]["note"] == "Bags piled by the curb", who        # the note is public, on purpose
+        assert seen["mine"] is False
+        blob = json.dumps(seen)
+        assert "Ana Reporter" not in blob and "reporter_id" not in blob and "photo_path" not in blob, who   # no name, no id, no photo
+    assert next(f for f in env.client.get("/api/flags", headers=H(ana)).json()["flags"] if f["id"] == fid)["mine"] is True
+
+    ok = env.client.post(f"/api/flags/{fid}/confirm", headers=H(ben), json={"lat": HOME[0], "lon": HOME[1], "accuracy": 10}).json()
+    assert ok["points"] == 3 and me(env, ana)["points"] == 10
+    assert next(f for f in env.client.get("/api/flags", headers=H(cara)).json()["flags"] if f["id"] == fid)["unconfirmed"] is False
+
+    env.v.set(confidence=0.9)   # a sure photo this time
+    drain = flag(env, "drain_clear", "311", user=cara)
+    assert submit(env, cara, start(env, cara, drain), drain["lat"], drain["lon"], seed=95).json()["outcome"] == "verified"
+    for headers in (H(ana), H(ben), {}):     # once done, it is off everyone's map
+        assert drain["id"] not in {f["id"] for f in env.client.get("/api/flags", headers=headers).json()["flags"]}
+
+    board = env.client.get("/api/leaderboard").json()        # public, no sign-in needed
+    for tab in ("weekly", "all_time"):
+        rows = {r["nickname"]: r["points"] for r in board[tab]}
+        assert rows["Ana Reporter"] == 10 and rows["Ben Walker"] == 3 and rows["Cara Helper"] == me(env, cara)["points"] > 10
+        assert [r["points"] for r in board[tab]] == sorted((r["points"] for r in board[tab]), reverse=True)
+    assert env.client.get("/api/impact").json()["verified_total"] >= 1
