@@ -1,6 +1,6 @@
 # Parasol
 
-By TheUmbrellaClub. Small neighborhood tasks, guided by satellite data.
+Small neighborhood tasks, guided by satellite data.
 
 A mobile-first map app where **satellites and city data show where small tasks would help**, volunteers do them, and
 **Gemini checks the photo**. Covers all of Baltimore City (the area is configurable).
